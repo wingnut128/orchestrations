@@ -9,6 +9,7 @@ Temporal-based agent orchestration platform. Claude agents subscribe to Temporal
 ## Runtime & Tooling
 
 - **Runtime:** Bun (not Node.js). Use `bun` for all execution, `bun install` for deps, `bun test` for tests.
+- **Linter/Formatter:** Biome. Run `bun run check` to lint+format check, `bun run check:fix` to auto-fix. Biome uses tabs and double quotes.
 - **Temporal SDK:** `@temporalio/worker`, `@temporalio/client`, `@temporalio/workflow`, `@temporalio/activity`
 - **Container images:** Always use Chainguard free-tier base images (`cgr.dev/chainguard/node`, etc.) — never Docker Hub `node:*` defaults.
 
@@ -23,6 +24,12 @@ bun run worker:greeter
 
 # Execute the greeter workflow via client
 bun run client:greeter
+
+# Lint + format check
+bun run check
+
+# Auto-fix lint + format issues
+bun run check:fix
 
 # Run tests
 bun test
