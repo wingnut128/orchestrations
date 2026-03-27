@@ -1,9 +1,7 @@
 import { Client } from "@temporalio/client";
+import { deployApprovalSignal } from "../signals/agent-protocol.ts";
 import { createConnection, namespace } from "../temporal-connection.ts";
-import {
-	deployApprovalSignal,
-	getPipelineStateQuery,
-} from "../workflows/ci-pipeline.ts";
+import { getPipelineStateQuery } from "../workflows/ci-pipeline.ts";
 
 async function run() {
 	const connection = await createConnection();
@@ -21,8 +19,8 @@ async function run() {
 	});
 	console.log(`Started CI pipeline workflow: ${pipelineWorkflowId}`);
 
-	// Step 2: Wait for the pipeline to reach "awaiting-code-review"
-	await waitForStage(pipelineHandle, "awaiting-code-review");
+	// Step 2: Wait for the pipeline to reach "awaiting-agent-results"
+	await waitForStage(pipelineHandle, "awaiting-agent-results");
 	console.log(
 		"Pipeline is awaiting code review. Starting code-review workflow...",
 	);

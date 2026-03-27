@@ -16,6 +16,11 @@ export interface CodeReviewResult {
 	status: "pending";
 }
 
+export interface SecurityScanResult {
+	scanId: string;
+	status: "pending";
+}
+
 export interface DeployResult {
 	success: boolean;
 	environment: string;
@@ -70,6 +75,38 @@ export async function requestCodeReview(
 	console.log(`[activity] started code-review workflow: ${reviewWorkflowId}`);
 	return {
 		reviewId: reviewWorkflowId,
+		status: "pending",
+	};
+}
+
+export async function requestSecurityScan(
+	commitSha: string,
+	pipelineWorkflowId: string,
+	owner: string,
+	repo: string,
+): Promise<SecurityScanResult> {
+	console.log(
+		`[activity] security scan requested for ${owner}/${repo}@${commitSha.slice(0, 7)} (pipeline: ${pipelineWorkflowId})`,
+	);
+
+	const { Client } = await import("@temporalio/client");
+	const { createConnection, namespace } = await import(
+		"../temporal-connection.ts"
+	);
+	const connection = await createConnection();
+	const client = new Client({ connection, namespace });
+
+	const scanWorkflowId = `security-scan-${commitSha.slice(0, 12)}-${Date.now()}`;
+
+	await client.workflow.start("securityScanWorkflow", {
+		taskQueue: "security-scan",
+		workflowId: scanWorkflowId,
+		args: [{ commitSha, pipelineWorkflowId, owner, repo }],
+	});
+
+	console.log(`[activity] started security-scan workflow: ${scanWorkflowId}`);
+	return {
+		scanId: scanWorkflowId,
 		status: "pending",
 	};
 }

@@ -1,10 +1,10 @@
 import { Client } from "@temporalio/client";
-import { createConnection, namespace } from "../temporal-connection.ts";
 import {
-	codeReviewCompleteSignal,
+	agentResultSignal,
 	deployApprovalSignal,
-	getPipelineStateQuery,
-} from "../workflows/ci-pipeline.ts";
+} from "../signals/agent-protocol.ts";
+import { createConnection, namespace } from "../temporal-connection.ts";
+import { getPipelineStateQuery } from "../workflows/ci-pipeline.ts";
 
 async function run() {
 	const connection = await createConnection();
@@ -22,16 +22,24 @@ async function run() {
 
 	console.log(`Started CI pipeline workflow: ${workflowId}`);
 
-	// Poll until the workflow reaches "awaiting-code-review"
-	await waitForStage(handle, "awaiting-code-review");
-	console.log("Pipeline is awaiting code review. Sending approval signal...");
+	// Poll until the workflow reaches "awaiting-agent-results"
+	await waitForStage(handle, "awaiting-agent-results");
+	console.log(
+		"Pipeline is awaiting agent results. Sending approval signals...",
+	);
 
-	// Simulate: an external code-review agent signals that the review is approved
-	await handle.signal(codeReviewCompleteSignal, {
+	// Simulate: agents signal approval
+	await handle.signal(agentResultSignal, {
+		agentType: "code-review",
 		approved: true,
-		reviewer: "review-bot",
+		agent: "review-bot",
 	});
-	console.log("Code review signal sent.");
+	await handle.signal(agentResultSignal, {
+		agentType: "security-scan",
+		approved: true,
+		agent: "scan-bot",
+	});
+	console.log("Agent result signals sent.");
 
 	// Poll until the workflow reaches "awaiting-deploy-approval"
 	await waitForStage(handle, "awaiting-deploy-approval");

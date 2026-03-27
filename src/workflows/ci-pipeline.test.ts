@@ -5,6 +5,7 @@ import type {
 	BuildResult,
 	CodeReviewResult,
 	DeployResult,
+	SecurityScanResult,
 	TestResult,
 } from "../activities/ci-pipeline.ts";
 import type { PipelineState } from "./ci-pipeline.ts";
@@ -32,6 +33,12 @@ function createMockActivities(overrides?: {
 		owner: string,
 		repo: string,
 	) => Promise<CodeReviewResult>;
+	requestSecurityScan?: (
+		commitSha: string,
+		pipelineWorkflowId: string,
+		owner: string,
+		repo: string,
+	) => Promise<SecurityScanResult>;
 	deploy?: (artifactUrl: string, environment: string) => Promise<DeployResult>;
 }) {
 	return {
@@ -56,6 +63,12 @@ function createMockActivities(overrides?: {
 				reviewId: `review-${_commitSha.slice(0, 7)}`,
 				status: "pending",
 			})),
+		requestSecurityScan:
+			overrides?.requestSecurityScan ??
+			(async (_commitSha: string): Promise<SecurityScanResult> => ({
+				scanId: `scan-${_commitSha.slice(0, 7)}`,
+				status: "pending",
+			})),
 		deploy:
 			overrides?.deploy ??
 			(async (
@@ -69,8 +82,29 @@ function createMockActivities(overrides?: {
 	};
 }
 
+async function waitForStage(
+	handle: Awaited<
+		ReturnType<TestWorkflowEnvironment["client"]["workflow"]["start"]>
+	>,
+	targetStage: string,
+	maxAttempts = 50,
+): Promise<PipelineState> {
+	for (let i = 0; i < maxAttempts; i++) {
+		await sleep(100);
+		const state: PipelineState = await handle.query("getPipelineState");
+		if (
+			state.stage === targetStage ||
+			state.stage === "failed" ||
+			state.stage === "completed"
+		) {
+			return state;
+		}
+	}
+	throw new Error(`Timed out waiting for stage: ${targetStage}`);
+}
+
 describe("ciPipelineWorkflow", () => {
-	it("completes the full pipeline with signals", async () => {
+	it("completes the full pipeline with fan-out/fan-in agent signals", async () => {
 		const { client, nativeConnection } = testEnv;
 		const taskQueue = "test-ci-happy";
 
@@ -88,36 +122,32 @@ describe("ciPipelineWorkflow", () => {
 				taskQueue,
 			});
 
-			// Wait for the workflow to reach awaiting-code-review
-			let state: PipelineState;
-			do {
-				await sleep(100);
-				state = await handle.query("getPipelineState");
-			} while (
-				state.stage !== "awaiting-code-review" &&
-				state.stage !== "failed" &&
-				state.stage !== "completed"
-			);
-			expect(state.stage).toBe("awaiting-code-review");
+			// Wait for fan-out stage
+			const state = await waitForStage(handle, "awaiting-agent-results");
+			expect(state.stage).toBe("awaiting-agent-results");
 
-			// Send code review approval signal
-			await handle.signal("codeReviewComplete", {
+			// Both agents signal back approval
+			await handle.signal("agentResult", {
+				agentType: "code-review",
 				approved: true,
-				reviewer: "alice",
+				agent: "alice",
+				details: "Looks good",
+			});
+			await handle.signal("agentResult", {
+				agentType: "security-scan",
+				approved: true,
+				agent: "scanner",
+				details: "No issues found",
 			});
 
-			// Wait for the workflow to reach awaiting-deploy-approval
-			do {
-				await sleep(100);
-				state = await handle.query("getPipelineState");
-			} while (
-				state.stage !== "awaiting-deploy-approval" &&
-				state.stage !== "failed" &&
-				state.stage !== "completed"
+			// Wait for deploy approval stage
+			const stateAfterAgents = await waitForStage(
+				handle,
+				"awaiting-deploy-approval",
 			);
-			expect(state.stage).toBe("awaiting-deploy-approval");
+			expect(stateAfterAgents.stage).toBe("awaiting-deploy-approval");
 
-			// Send deploy approval signal
+			// Send deploy approval
 			await handle.signal("deployApproval", {
 				approved: true,
 				approver: "bob",
@@ -129,15 +159,15 @@ describe("ciPipelineWorkflow", () => {
 		expect(result.stage).toBe("completed");
 		expect(result.buildResult?.success).toBe(true);
 		expect(result.testResult?.success).toBe(true);
-		expect(result.codeReview?.approved).toBe(true);
-		expect(result.codeReview?.reviewer).toBe("alice");
+		expect(result.agentResults["code-review"].approved).toBe(true);
+		expect(result.agentResults["security-scan"].approved).toBe(true);
 		expect(result.deployApproval?.approved).toBe(true);
 		expect(result.deployResult?.success).toBe(true);
 	});
 
-	it("fails when code review is rejected", async () => {
+	it("fails when one agent rejects", async () => {
 		const { client, nativeConnection } = testEnv;
-		const taskQueue = "test-ci-rejected";
+		const taskQueue = "test-ci-partial-reject";
 
 		const worker = await Worker.create({
 			connection: nativeConnection,
@@ -149,35 +179,84 @@ describe("ciPipelineWorkflow", () => {
 		const result = await worker.runUntil(async () => {
 			const handle = await client.workflow.start("ciPipelineWorkflow", {
 				args: [{ commitSha: COMMIT_SHA, owner: "testuser", repo: "testrepo" }],
-				workflowId: "test-ci-review-rejected",
+				workflowId: "test-ci-partial-reject",
 				taskQueue,
 			});
 
-			// Wait for code review stage
-			let state: PipelineState;
-			do {
-				await sleep(100);
-				state = await handle.query("getPipelineState");
-			} while (
-				state.stage !== "awaiting-code-review" &&
-				state.stage !== "failed" &&
-				state.stage !== "completed"
-			);
+			await waitForStage(handle, "awaiting-agent-results");
 
-			// Reject the code review
-			await handle.signal("codeReviewComplete", {
+			// Code review approves, security scan rejects
+			await handle.signal("agentResult", {
+				agentType: "code-review",
+				approved: true,
+				agent: "alice",
+			});
+			await handle.signal("agentResult", {
+				agentType: "security-scan",
 				approved: false,
-				reviewer: "charlie",
+				agent: "scanner",
+				details: "Critical vulnerability found",
 			});
 
 			return await handle.result();
 		});
 
 		expect(result.stage).toBe("failed");
-		expect(result.error).toContain("rejected by charlie");
+		expect(result.error).toContain("security-scan");
 	});
 
-	it("reports correct stage via query at each point", async () => {
+	it("handles agents reporting in reverse order", async () => {
+		const { client, nativeConnection } = testEnv;
+		const taskQueue = "test-ci-reverse-order";
+
+		const worker = await Worker.create({
+			connection: nativeConnection,
+			taskQueue,
+			workflowsPath: new URL("./ci-pipeline.ts", import.meta.url).pathname,
+			activities: createMockActivities(),
+		});
+
+		const result = await worker.runUntil(async () => {
+			const handle = await client.workflow.start("ciPipelineWorkflow", {
+				args: [{ commitSha: COMMIT_SHA, owner: "testuser", repo: "testrepo" }],
+				workflowId: "test-ci-reverse-order",
+				taskQueue,
+			});
+
+			await waitForStage(handle, "awaiting-agent-results");
+
+			// Security scan reports first, then code review
+			await handle.signal("agentResult", {
+				agentType: "security-scan",
+				approved: true,
+				agent: "scanner",
+			});
+
+			// Pipeline should still be waiting (code-review hasn't reported)
+			await sleep(200);
+			const midState: PipelineState = await handle.query("getPipelineState");
+			expect(midState.stage).toBe("awaiting-agent-results");
+
+			await handle.signal("agentResult", {
+				agentType: "code-review",
+				approved: true,
+				agent: "alice",
+			});
+
+			// Now send deploy approval
+			await waitForStage(handle, "awaiting-deploy-approval");
+			await handle.signal("deployApproval", {
+				approved: true,
+				approver: "bob",
+			});
+
+			return await handle.result();
+		});
+
+		expect(result.stage).toBe("completed");
+	});
+
+	it("reports correct stages via query", async () => {
 		const { client, nativeConnection } = testEnv;
 		const taskQueue = "test-ci-query";
 
@@ -197,7 +276,7 @@ describe("ciPipelineWorkflow", () => {
 				taskQueue,
 			});
 
-			// Poll for awaiting-code-review (build and test happen fast with mocks)
+			// Poll for awaiting-agent-results
 			let state: PipelineState;
 			do {
 				state = await handle.query("getPipelineState");
@@ -205,14 +284,20 @@ describe("ciPipelineWorkflow", () => {
 					stages.push(state.stage);
 				}
 			} while (
-				state.stage !== "awaiting-code-review" &&
+				state.stage !== "awaiting-agent-results" &&
 				state.stage !== "failed"
 			);
 
-			// Approve code review
-			await handle.signal("codeReviewComplete", {
+			// Approve both agents
+			await handle.signal("agentResult", {
+				agentType: "code-review",
 				approved: true,
-				reviewer: "dave",
+				agent: "dave",
+			});
+			await handle.signal("agentResult", {
+				agentType: "security-scan",
+				approved: true,
+				agent: "scanner",
 			});
 
 			// Poll for awaiting-deploy-approval
@@ -236,8 +321,7 @@ describe("ciPipelineWorkflow", () => {
 		});
 
 		expect(result.stage).toBe("completed");
-		// We should have observed at least these stages
-		expect(stages).toContain("awaiting-code-review");
+		expect(stages).toContain("awaiting-agent-results");
 		expect(stages).toContain("awaiting-deploy-approval");
 	});
 });

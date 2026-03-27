@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Client } from "@temporalio/client";
 import { config } from "../config.ts";
+import { agentResultSignal } from "../signals/agent-protocol.ts";
 import { createConnection, namespace } from "../temporal-connection.ts";
-import { codeReviewCompleteSignal } from "../workflows/ci-pipeline.ts";
 
 const anthropic = new Anthropic();
 
@@ -108,9 +108,11 @@ export async function signalPipelineReview(
 	const client = new Client({ connection, namespace });
 
 	const handle = client.workflow.getHandle(pipelineWorkflowId);
-	await handle.signal(codeReviewCompleteSignal, {
+	await handle.signal(agentResultSignal, {
+		agentType: "code-review",
 		approved,
-		reviewer: `claude-review-agent: ${feedback}`,
+		agent: "claude-review-agent",
+		details: feedback,
 	});
 
 	console.log("[activity] signalPipelineReview sent successfully");
