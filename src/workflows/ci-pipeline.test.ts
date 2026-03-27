@@ -26,7 +26,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function createMockActivities(overrides?: {
 	build?: (commitSha: string) => Promise<BuildResult>;
 	test?: (artifactUrl: string) => Promise<TestResult>;
-	requestCodeReview?: (commitSha: string) => Promise<CodeReviewResult>;
+	requestCodeReview?: (
+		commitSha: string,
+		pipelineWorkflowId: string,
+		owner: string,
+		repo: string,
+	) => Promise<CodeReviewResult>;
 	deploy?: (artifactUrl: string, environment: string) => Promise<DeployResult>;
 }) {
 	return {
@@ -78,7 +83,7 @@ describe("ciPipelineWorkflow", () => {
 
 		const result = await worker.runUntil(async () => {
 			const handle = await client.workflow.start("ciPipelineWorkflow", {
-				args: [COMMIT_SHA],
+				args: [{ commitSha: COMMIT_SHA, owner: "testuser", repo: "testrepo" }],
 				workflowId: "test-ci-happy-path",
 				taskQueue,
 			});
@@ -143,7 +148,7 @@ describe("ciPipelineWorkflow", () => {
 
 		const result = await worker.runUntil(async () => {
 			const handle = await client.workflow.start("ciPipelineWorkflow", {
-				args: [COMMIT_SHA],
+				args: [{ commitSha: COMMIT_SHA, owner: "testuser", repo: "testrepo" }],
 				workflowId: "test-ci-review-rejected",
 				taskQueue,
 			});
@@ -187,7 +192,7 @@ describe("ciPipelineWorkflow", () => {
 
 		const result = await worker.runUntil(async () => {
 			const handle = await client.workflow.start("ciPipelineWorkflow", {
-				args: [COMMIT_SHA],
+				args: [{ commitSha: COMMIT_SHA, owner: "testuser", repo: "testrepo" }],
 				workflowId: "test-ci-query-stages",
 				taskQueue,
 			});

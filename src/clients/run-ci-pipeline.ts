@@ -16,7 +16,7 @@ async function run() {
 	const handle = await client.workflow.start("ciPipelineWorkflow", {
 		taskQueue: "ci-pipeline",
 		workflowId,
-		args: [commitSha],
+		args: [{ commitSha, owner: "demo", repo: "demo-repo" }],
 	});
 
 	console.log(`Started CI pipeline workflow: ${workflowId}`);

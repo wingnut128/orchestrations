@@ -1,40 +1,52 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Client, Connection } from "@temporalio/client";
+import { config } from "../config.ts";
 import { codeReviewCompleteSignal } from "../workflows/ci-pipeline.ts";
 
 const anthropic = new Anthropic();
 
-export async function fetchDiff(commitSha: string): Promise<string> {
-	console.log(`[activity] fetchDiff for commit ${commitSha}`);
-	// Stub: return a sample diff — will wire to real git later
-	return `diff --git a/src/utils/auth.ts b/src/utils/auth.ts
-index 3a1b2c3..4d5e6f7 100644
---- a/src/utils/auth.ts
-+++ b/src/utils/auth.ts
-@@ -12,8 +12,12 @@ export function validateToken(token: string): boolean {
--  if (!token) return false;
--  return token.length > 0;
-+  if (!token || typeof token !== "string") return false;
-+  if (token.length < 32) return false;
-+  try {
-+    const decoded = Buffer.from(token, "base64");
-+    return decoded.length > 0 && decoded.toString("base64") === token;
-+  } catch {
-+    return false;
-+  }
- }
+/**
+ * Fetch a commit diff from the Forgejo API.
+ *
+ * Endpoint: GET /api/v1/repos/{owner}/{repo}/git/commits/{sha}.diff
+ * Falls back to a patch endpoint if .diff is unavailable.
+ */
+export async function fetchDiff(
+	commitSha: string,
+	owner?: string,
+	repo?: string,
+): Promise<string> {
+	const repoOwner = owner ?? process.env.FORGEJO_REPO_OWNER ?? "";
+	const repoName = repo ?? process.env.FORGEJO_REPO_NAME ?? "";
 
-diff --git a/src/handlers/login.ts b/src/handlers/login.ts
-index 7f8g9h0..1a2b3c4 100644
---- a/src/handlers/login.ts
-+++ b/src/handlers/login.ts
-@@ -5,3 +5,9 @@ export async function handleLogin(req: Request): Promise<Response> {
-+  const rateLimit = getRateLimiter(req.ip);
-+  if (rateLimit.isExceeded()) {
-+    return new Response("Too many requests", { status: 429 });
-+  }
-+
-   const { username, password } = await req.json();`;
+	if (!repoOwner || !repoName) {
+		throw new Error(
+			"fetchDiff requires owner/repo — set FORGEJO_REPO_OWNER and FORGEJO_REPO_NAME or pass them as arguments",
+		);
+	}
+
+	const url = `${config.forgejo.url}/api/v1/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/git/commits/${encodeURIComponent(commitSha)}.diff`;
+
+	console.log(`[activity] fetchDiff GET ${url}`);
+
+	const headers: Record<string, string> = {
+		Accept: "text/plain",
+	};
+	if (config.forgejo.token) {
+		headers.Authorization = `token ${config.forgejo.token}`;
+	}
+
+	const response = await fetch(url, { headers });
+
+	if (!response.ok) {
+		throw new Error(
+			`Forgejo API error: ${response.status} ${response.statusText} — ${url}`,
+		);
+	}
+
+	const diff = await response.text();
+	console.log(`[activity] fetchDiff got ${diff.length} chars for ${commitSha}`);
+	return diff;
 }
 
 export async function reviewDiff(

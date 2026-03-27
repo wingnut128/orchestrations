@@ -1,12 +1,54 @@
 services:
-  # ── Temporal server (dev/local) ──────────────────────────────
+  # ── Forgejo (local git forge) ────────────────────────────────
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:11
+    ports:
+      - "3000:3000" # Web UI
+      - "2222:22" # SSH
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      # ── App settings ──
+      - FORGEJO__server__ROOT_URL=http://localhost:3000/
+      - FORGEJO__server__SSH_PORT=2222
+      - FORGEJO__server__SSH_LISTEN_PORT=22
+      # ── SQLite (no external DB needed) ──
+      - FORGEJO__database__DB_TYPE=sqlite3
+      # ── Disable features we don't need locally ──
+      - FORGEJO__mailer__ENABLED=false
+      - FORGEJO__service__DISABLE_REGISTRATION=false
+      # ── Webhook: allow localhost targets ──
+      - FORGEJO__webhook__ALLOWED_HOST_LIST=*
+      - FORGEJO__webhook__SKIP_TLS_VERIFY=true
+    volumes:
+      - forgejo-data:/data
+    restart: unless-stopped
+
+  # ── Temporal persistence (Postgres) ─────────────────────────
+  temporal-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-db-data:/var/lib/postgresql
+    restart: unless-stopped
+
+  # ── Temporal server (auto-setup with Postgres) ─────────────
   temporal:
     image: temporalio/auto-setup:latest
     ports:
       - "7233:7233"
     environment:
-      - DB=sqlite
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-db
+    depends_on:
+      - temporal-db
+    restart: on-failure
 
   # ── Temporal Web UI ──────────────────────────────────────────
   temporal-ui:
@@ -46,3 +88,7 @@ services:
     depends_on:
       - temporal
     restart: on-failure
+
+volumes:
+  forgejo-data:
+  temporal-db-data:

@@ -38,6 +38,10 @@ worker-agent-task: ## Start agent-task worker (needs op for API key)
 worker-code-review: ## Start code review worker (needs op for API key)
 	$(OP_RUN) bun run worker:code-review
 
+## Webhook
+webhook: ## Start webhook receiver (needs op for API key)
+	$(OP_RUN) bun run webhook
+
 ## Demos
 demo-greeter: ## Run greeter workflow demo
 	bun run client:greeter
@@ -60,3 +64,19 @@ docker-up: ## Start all services with Docker Compose
 
 docker-down: ## Stop all Docker Compose services
 	docker compose down
+
+## Local Dev Environment (Forgejo + Temporal)
+dev-up: ## Start Forgejo + Temporal (local dev infra)
+	docker compose up -d forgejo temporal temporal-ui
+	@echo ""
+	@echo "  Forgejo:      http://localhost:3000"
+	@echo "  Temporal UI:  http://localhost:8233"
+	@echo ""
+	@echo "  First time? Register at http://localhost:3000/user/sign_up"
+	@echo "  (first registered user becomes admin)"
+
+dev-down: ## Stop local dev infra
+	docker compose down
+
+dev-logs: ## Tail logs for local dev infra
+	docker compose logs -f forgejo temporal temporal-ui
