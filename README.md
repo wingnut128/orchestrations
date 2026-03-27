@@ -2,7 +2,7 @@
 
 Temporal-based agent orchestration platform. Claude agents subscribe to Temporal workflow events and publish events for other agents to process.
 
-Part of the [Forge-Decoupled Agentic CI/CD Architecture](https://linear.app/beavis/project/forge-decoupled-agentic-cicd-architecture-c92baa3fbd36) — decoupling Git hosting (Forgejo) from workflow orchestration (Temporal) and workload identity (SPIFFE/SPIRE).
+Part of the Forge-Decoupled Agentic CI/CD Architecture — decoupling Git hosting (Forgejo) from workflow orchestration (Temporal) and workload identity (SPIFFE/SPIRE).
 
 ## Prerequisites
 
