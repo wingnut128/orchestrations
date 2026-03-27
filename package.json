@@ -13,6 +13,7 @@
 		"client:ci-pipeline": "bun run src/clients/run-ci-pipeline.ts",
 		"worker:code-review": "bun run src/workers/code-review.ts",
 		"client:code-review-demo": "bun run src/clients/run-code-review-demo.ts",
+		"webhook": "bun run src/webhook/server.ts",
 		"check": "biome check",
 		"check:fix": "biome check --write",
 		"test": "bun test"
