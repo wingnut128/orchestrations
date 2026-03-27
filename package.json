@@ -11,9 +11,12 @@
     "client:agent-task": "bun run src/clients/run-agent-task.ts",
     "worker:ci-pipeline": "bun run src/workers/ci-pipeline.ts",
     "client:ci-pipeline": "bun run src/clients/run-ci-pipeline.ts",
+    "check": "biome check",
+    "check:fix": "biome check --write",
     "test": "bun test"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.9",
     "@types/bun": "latest"
   },
   "peerDependencies": {
