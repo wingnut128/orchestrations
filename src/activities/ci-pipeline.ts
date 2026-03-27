@@ -44,8 +44,11 @@ export async function test(artifactUrl: string): Promise<TestResult> {
 
 export async function requestCodeReview(
 	commitSha: string,
+	pipelineWorkflowId?: string,
 ): Promise<CodeReviewResult> {
-	console.log(`[activity] code review requested for commit ${commitSha}`);
+	console.log(
+		`[activity] code review requested for commit ${commitSha}${pipelineWorkflowId ? ` (pipeline: ${pipelineWorkflowId})` : ""}`,
+	);
 	return {
 		reviewId: `review-${commitSha.slice(0, 7)}`,
 		status: "pending",
