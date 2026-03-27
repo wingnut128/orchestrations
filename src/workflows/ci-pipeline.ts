@@ -4,6 +4,7 @@ import {
 	defineSignal,
 	proxyActivities,
 	setHandler,
+	workflowInfo,
 } from "@temporalio/workflow";
 import type * as activities from "../activities/ci-pipeline.ts";
 
@@ -60,11 +61,20 @@ const { build, test, requestCodeReview, deploy } = proxyActivities<
 	startToCloseTimeout: "60s",
 });
 
+// --- Types (input) ---
+
+export interface PipelineInput {
+	commitSha: string;
+	owner: string;
+	repo: string;
+}
+
 // --- Workflow ---
 
 export async function ciPipelineWorkflow(
-	commitSha: string,
+	input: PipelineInput,
 ): Promise<PipelineState> {
+	const { commitSha, owner, repo } = input;
 	const state: PipelineState = {
 		stage: "queued",
 		commitSha,
@@ -116,7 +126,13 @@ export async function ciPipelineWorkflow(
 
 	// --- Stage 3: Code Review ---
 	state.stage = "awaiting-code-review";
-	const reviewResult = await requestCodeReview(commitSha);
+	const pipelineWorkflowId = workflowInfo().workflowId;
+	const reviewResult = await requestCodeReview(
+		commitSha,
+		pipelineWorkflowId,
+		owner,
+		repo,
+	);
 	state.codeReview = {
 		reviewId: reviewResult.reviewId,
 		approved: false,

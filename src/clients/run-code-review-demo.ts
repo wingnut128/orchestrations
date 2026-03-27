@@ -16,7 +16,7 @@ async function run() {
 	const pipelineHandle = await client.workflow.start("ciPipelineWorkflow", {
 		taskQueue: "ci-pipeline",
 		workflowId: pipelineWorkflowId,
-		args: [commitSha],
+		args: [{ commitSha, owner: "demo", repo: "demo-repo" }],
 	});
 	console.log(`Started CI pipeline workflow: ${pipelineWorkflowId}`);
 
@@ -30,7 +30,7 @@ async function run() {
 	const reviewHandle = await client.workflow.start("codeReviewWorkflow", {
 		taskQueue: "code-review",
 		workflowId: reviewWorkflowId,
-		args: [commitSha, pipelineWorkflowId],
+		args: [{ commitSha, pipelineWorkflowId, owner: "demo", repo: "demo-repo" }],
 	});
 	console.log(`Started code-review workflow: ${reviewWorkflowId}`);
 

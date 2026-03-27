@@ -44,13 +44,31 @@ export async function test(artifactUrl: string): Promise<TestResult> {
 
 export async function requestCodeReview(
 	commitSha: string,
-	pipelineWorkflowId?: string,
+	pipelineWorkflowId: string,
+	owner: string,
+	repo: string,
 ): Promise<CodeReviewResult> {
 	console.log(
-		`[activity] code review requested for commit ${commitSha}${pipelineWorkflowId ? ` (pipeline: ${pipelineWorkflowId})` : ""}`,
+		`[activity] code review requested for ${owner}/${repo}@${commitSha.slice(0, 7)} (pipeline: ${pipelineWorkflowId})`,
 	);
+
+	const { Client, Connection } = await import("@temporalio/client");
+	const connection = await Connection.connect({
+		address: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
+	});
+	const client = new Client({ connection });
+
+	const reviewWorkflowId = `code-review-${commitSha.slice(0, 12)}-${Date.now()}`;
+
+	await client.workflow.start("codeReviewWorkflow", {
+		taskQueue: "code-review",
+		workflowId: reviewWorkflowId,
+		args: [{ commitSha, pipelineWorkflowId, owner, repo }],
+	});
+
+	console.log(`[activity] started code-review workflow: ${reviewWorkflowId}`);
 	return {
-		reviewId: `review-${commitSha.slice(0, 7)}`,
+		reviewId: reviewWorkflowId,
 		status: "pending",
 	};
 }

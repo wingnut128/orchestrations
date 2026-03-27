@@ -7,6 +7,13 @@ const { fetchDiff, reviewDiff, signalPipelineReview } = proxyActivities<
 	startToCloseTimeout: "120s",
 });
 
+export interface CodeReviewInput {
+	commitSha: string;
+	pipelineWorkflowId: string;
+	owner?: string;
+	repo?: string;
+}
+
 export interface CodeReviewResult {
 	commitSha: string;
 	approved: boolean;
@@ -14,11 +21,12 @@ export interface CodeReviewResult {
 }
 
 export async function codeReviewWorkflow(
-	commitSha: string,
-	pipelineWorkflowId: string,
+	input: CodeReviewInput,
 ): Promise<CodeReviewResult> {
-	// Step 1: Fetch the diff for this commit
-	const diff = await fetchDiff(commitSha);
+	const { commitSha, pipelineWorkflowId, owner, repo } = input;
+
+	// Step 1: Fetch the diff for this commit from Forgejo
+	const diff = await fetchDiff(commitSha, owner, repo);
 
 	// Step 2: Ask Claude to review the diff
 	const review = await reviewDiff(diff);
