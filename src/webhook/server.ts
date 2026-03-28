@@ -1,5 +1,6 @@
-import { Client, Connection } from "@temporalio/client";
+import { Client } from "@temporalio/client";
 import { config } from "../config.ts";
+import { createConnection, namespace } from "../temporal-connection.ts";
 import { verifySignature } from "./verify.ts";
 
 interface ForgejoPushPayload {
@@ -24,10 +25,8 @@ interface ForgejoPushPayload {
 }
 
 async function getTemporalClient(): Promise<Client> {
-	const connection = await Connection.connect({
-		address: config.temporal.address,
-	});
-	return new Client({ connection });
+	const connection = await createConnection();
+	return new Client({ connection, namespace });
 }
 
 async function handlePush(payload: ForgejoPushPayload): Promise<string> {

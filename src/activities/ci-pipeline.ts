@@ -52,11 +52,12 @@ export async function requestCodeReview(
 		`[activity] code review requested for ${owner}/${repo}@${commitSha.slice(0, 7)} (pipeline: ${pipelineWorkflowId})`,
 	);
 
-	const { Client, Connection } = await import("@temporalio/client");
-	const connection = await Connection.connect({
-		address: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
-	});
-	const client = new Client({ connection });
+	const { Client } = await import("@temporalio/client");
+	const { createConnection, namespace } = await import(
+		"../temporal-connection.ts"
+	);
+	const connection = await createConnection();
+	const client = new Client({ connection, namespace });
 
 	const reviewWorkflowId = `code-review-${commitSha.slice(0, 12)}-${Date.now()}`;
 

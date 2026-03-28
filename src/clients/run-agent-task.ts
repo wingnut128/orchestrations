@@ -1,8 +1,9 @@
-import { Client, Connection } from "@temporalio/client";
+import { Client } from "@temporalio/client";
+import { createConnection, namespace } from "../temporal-connection.ts";
 
 async function run() {
-	const connection = await Connection.connect({ address: "localhost:7233" });
-	const client = new Client({ connection });
+	const connection = await createConnection();
+	const client = new Client({ connection, namespace });
 
 	const result = await client.workflow.execute("agentTaskWorkflow", {
 		taskQueue: "agent-task",
