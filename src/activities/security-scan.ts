@@ -1,4 +1,10 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@temporalio/client";
+import { ApplicationFailure } from "@temporalio/common";
+import { config } from "../config.ts";
 import { agentResultSignal } from "../signals/agent-protocol.ts";
 import { createConnection, namespace } from "../temporal-connection.ts";
 
@@ -10,23 +16,165 @@ export interface ScanFindings {
 	summary: string;
 }
 
-export async function scanForVulnerabilities(
+interface SnykVulnerability {
+	id: string;
+	severity: string;
+	title: string;
+	packageName: string;
+	version: string;
+}
+
+interface SnykOutput {
+	ok: boolean;
+	vulnerabilities: SnykVulnerability[];
+	summary?: string;
+}
+
+// --- Helpers ---
+
+function runCommand(
+	cmd: string,
+	args: string[],
+	opts?: { cwd?: string; timeoutMs?: number },
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+	const timeoutMs = opts?.timeoutMs ?? 60_000;
+	return new Promise((resolve, reject) => {
+		const proc = execFile(
+			cmd,
+			args,
+			{ cwd: opts?.cwd, maxBuffer: 10 * 1024 * 1024, timeout: timeoutMs },
+			(error, stdout, stderr) => {
+				if (error && !("code" in error)) {
+					reject(error);
+					return;
+				}
+				resolve({
+					exitCode: proc.exitCode ?? (error ? 1 : 0),
+					stdout: stdout ?? "",
+					stderr: stderr ?? "",
+				});
+			},
+		);
+	});
+}
+
+async function cloneRepo(
+	owner: string,
+	repo: string,
 	commitSha: string,
-	_owner: string,
-	_repo: string,
-): Promise<ScanFindings> {
-	console.log(
-		`[activity] security scan started for ${_owner}/${_repo}@${commitSha.slice(0, 7)}`,
+): Promise<string> {
+	const token = config.forgejo.token;
+	if (!token) {
+		throw ApplicationFailure.nonRetryable(
+			"FORGEJO_TOKEN is required for cloning repositories",
+		);
+	}
+
+	const baseUrl = new URL(config.forgejo.url);
+	const cloneUrl = `${baseUrl.protocol}//${token}@${baseUrl.host}/${owner}/${repo}.git`;
+	const sanitizedUrl = cloneUrl.replace(token, "***");
+
+	const tempDir = await mkdtemp(join(tmpdir(), "snyk-scan-"));
+	const repoDir = join(tempDir, "repo");
+
+	console.log(`[activity] cloning ${sanitizedUrl} → ${repoDir}`);
+
+	const cloneResult = await runCommand("git", [
+		"clone",
+		"--no-checkout",
+		cloneUrl,
+		repoDir,
+	]);
+	if (cloneResult.exitCode !== 0) {
+		const sanitizedStderr = cloneResult.stderr.replaceAll(token, "***");
+		throw new Error(
+			`git clone failed (exit ${cloneResult.exitCode}): ${sanitizedStderr}`,
+		);
+	}
+
+	const checkoutResult = await runCommand("git", [
+		"-C",
+		repoDir,
+		"checkout",
+		"--",
+		commitSha,
+	]);
+	if (checkoutResult.exitCode !== 0) {
+		throw new Error(
+			`git checkout ${commitSha} failed (exit ${checkoutResult.exitCode}): ${checkoutResult.stderr}`,
+		);
+	}
+
+	console.log(`[activity] cloned ${owner}/${repo}@${commitSha.slice(0, 7)}`);
+	return tempDir;
+}
+
+async function runSnykTest(repoDir: string): Promise<ScanFindings> {
+	const snykToken = process.env.SNYK_TOKEN;
+	if (!snykToken) {
+		throw ApplicationFailure.nonRetryable(
+			"SNYK_TOKEN is required for security scanning",
+		);
+	}
+
+	const { exitCode, stdout, stderr } = await runCommand(
+		"snyk",
+		["test", "--json"],
+		{ cwd: repoDir, timeoutMs: 90_000 },
 	);
 
-	// Stub: simulate a security scan
-	return {
-		critical: 0,
-		high: 0,
-		medium: 2,
-		low: 5,
-		summary: "No critical or high severity findings. 2 medium, 5 low.",
-	};
+	if (exitCode >= 2) {
+		throw new Error(`snyk test failed (exit ${exitCode}): ${stderr}`);
+	}
+
+	return parseSnykOutput(stdout);
+}
+
+export function parseSnykOutput(stdout: string): ScanFindings {
+	const parsed = JSON.parse(stdout) as SnykOutput;
+	const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+
+	for (const vuln of parsed.vulnerabilities) {
+		const sev = vuln.severity as keyof typeof counts;
+		if (sev in counts) {
+			counts[sev]++;
+		}
+	}
+
+	const total = counts.critical + counts.high + counts.medium + counts.low;
+	const summary =
+		total === 0
+			? "No vulnerabilities found"
+			: `Found ${total} vulnerabilities: ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low`;
+
+	return { ...counts, summary };
+}
+
+// --- Activities ---
+
+export async function scanForVulnerabilities(
+	commitSha: string,
+	owner: string,
+	repo: string,
+): Promise<ScanFindings> {
+	console.log(
+		`[activity] security scan started for ${owner}/${repo}@${commitSha.slice(0, 7)}`,
+	);
+
+	let tempDir: string | undefined;
+	try {
+		tempDir = await cloneRepo(owner, repo, commitSha);
+		const repoDir = join(tempDir, "repo");
+		const findings = await runSnykTest(repoDir);
+		console.log(`[activity] security scan complete: ${findings.summary}`);
+		return findings;
+	} finally {
+		if (tempDir) {
+			await rm(tempDir, { recursive: true, force: true }).catch((err) =>
+				console.warn(`[activity] failed to clean up ${tempDir}: ${err}`),
+			);
+		}
+	}
 }
 
 export async function signalPipelineScanResult(
