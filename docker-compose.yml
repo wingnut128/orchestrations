@@ -89,6 +89,32 @@ services:
       - temporal
     restart: on-failure
 
+  worker-code-review:
+    build: .
+    command: ["dist/workers/code-review.js"]
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - FORGEJO_URL=http://forgejo:3000
+      - FORGEJO_TOKEN=${FORGEJO_TOKEN}
+    depends_on:
+      - temporal
+      - forgejo
+    restart: on-failure
+
+  worker-security-scan:
+    build: .
+    command: ["dist/workers/security-scan.js"]
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - SNYK_TOKEN=${SNYK_TOKEN}
+      - FORGEJO_URL=http://forgejo:3000
+      - FORGEJO_TOKEN=${FORGEJO_TOKEN}
+    depends_on:
+      - temporal
+      - forgejo
+    restart: on-failure
+
 volumes:
   forgejo-data:
   temporal-db-data:
