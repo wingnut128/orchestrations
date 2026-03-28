@@ -29,11 +29,21 @@ async function getTemporalClient(): Promise<Client> {
 	return new Client({ connection, namespace });
 }
 
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+const NAME_RE = /^[a-zA-Z0-9._-]+$/;
+
 async function handlePush(payload: ForgejoPushPayload): Promise<string> {
 	const headCommit = payload.after;
 	const owner = payload.repository.owner.login;
 	const repo = payload.repository.name;
 	const branch = payload.ref.replace("refs/heads/", "");
+
+	if (!SHA_RE.test(headCommit)) {
+		throw new Error(`Invalid commit SHA: ${headCommit.slice(0, 20)}`);
+	}
+	if (!NAME_RE.test(owner) || !NAME_RE.test(repo)) {
+		throw new Error(`Invalid owner/repo: ${owner}/${repo}`);
+	}
 
 	console.log(
 		`[webhook] push to ${owner}/${repo}#${branch} — head commit ${headCommit}`,
@@ -52,6 +62,12 @@ async function handlePush(payload: ForgejoPushPayload): Promise<string> {
 	return workflowId;
 }
 
+if (!config.webhook.secret) {
+	throw new Error(
+		"WEBHOOK_SECRET is required — refusing to start without signature verification",
+	);
+}
+
 const server = Bun.serve({
 	port: config.webhook.port,
 
@@ -67,13 +83,11 @@ const server = Bun.serve({
 		if (req.method === "POST" && url.pathname === "/webhook/forgejo") {
 			const body = await req.text();
 
-			// Verify HMAC signature if a secret is configured
-			if (config.webhook.secret) {
-				const signature = req.headers.get("x-forgejo-signature") ?? "";
-				if (!verifySignature(body, signature, config.webhook.secret)) {
-					console.warn("[webhook] signature verification failed");
-					return new Response("Forbidden", { status: 403 });
-				}
+			// Verify HMAC signature
+			const signature = req.headers.get("x-forgejo-signature") ?? "";
+			if (!verifySignature(body, signature, config.webhook.secret)) {
+				console.warn("[webhook] signature verification failed");
+				return new Response("Forbidden", { status: 403 });
 			}
 
 			const event = req.headers.get("x-forgejo-event");
