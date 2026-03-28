@@ -1,22 +1,16 @@
 import {
 	condition,
 	defineQuery,
-	defineSignal,
 	proxyActivities,
 	setHandler,
 	workflowInfo,
 } from "@temporalio/workflow";
 import type * as activities from "../activities/ci-pipeline.ts";
-
-// --- Signals ---
-
-/** Signal that a code review has been completed. */
-export const codeReviewCompleteSignal =
-	defineSignal<[{ approved: boolean; reviewer: string }]>("codeReviewComplete");
-
-/** Signal that deployment has been approved. */
-export const deployApprovalSignal =
-	defineSignal<[{ approved: boolean; approver: string }]>("deployApproval");
+import {
+	type AgentResult,
+	agentResultSignal,
+	deployApprovalSignal,
+} from "../signals/agent-protocol.ts";
 
 // --- Queries ---
 
@@ -29,7 +23,7 @@ export type PipelineStage =
 	| "queued"
 	| "building"
 	| "testing"
-	| "awaiting-code-review"
+	| "awaiting-agent-results"
 	| "awaiting-deploy-approval"
 	| "deploying"
 	| "completed"
@@ -40,11 +34,7 @@ export interface PipelineState {
 	commitSha: string;
 	buildResult?: activities.BuildResult;
 	testResult?: activities.TestResult;
-	codeReview?: {
-		reviewId: string;
-		approved: boolean;
-		reviewer: string;
-	};
+	agentResults: Record<string, AgentResult>;
 	deployApproval?: {
 		approved: boolean;
 		approver: string;
@@ -55,11 +45,10 @@ export interface PipelineState {
 
 // --- Activity proxies ---
 
-const { build, test, requestCodeReview, deploy } = proxyActivities<
-	typeof activities
->({
-	startToCloseTimeout: "60s",
-});
+const { build, test, requestCodeReview, requestSecurityScan, deploy } =
+	proxyActivities<typeof activities>({
+		startToCloseTimeout: "60s",
+	});
 
 // --- Types (input) ---
 
@@ -71,6 +60,8 @@ export interface PipelineInput {
 
 // --- Workflow ---
 
+const EXPECTED_AGENTS = ["code-review", "security-scan"];
+
 export async function ciPipelineWorkflow(
 	input: PipelineInput,
 ): Promise<PipelineState> {
@@ -78,20 +69,15 @@ export async function ciPipelineWorkflow(
 	const state: PipelineState = {
 		stage: "queued",
 		commitSha,
+		agentResults: {},
 	};
 
-	// Mutable flags set by signal handlers
-	let codeReviewReceived = false;
+	// Mutable flag set by signal handler
 	let deployApprovalReceived = false;
 
 	// Register signal handlers
-	setHandler(codeReviewCompleteSignal, ({ approved, reviewer }) => {
-		state.codeReview = {
-			reviewId: state.codeReview?.reviewId ?? "unknown",
-			approved,
-			reviewer,
-		};
-		codeReviewReceived = true;
+	setHandler(agentResultSignal, (result: AgentResult) => {
+		state.agentResults[result.agentType] = result;
 	});
 
 	setHandler(deployApprovalSignal, ({ approved, approver }) => {
@@ -124,32 +110,34 @@ export async function ciPipelineWorkflow(
 		return state;
 	}
 
-	// --- Stage 3: Code Review ---
-	state.stage = "awaiting-code-review";
+	// --- Stage 3: Fan-out to agents ---
+	state.stage = "awaiting-agent-results";
 	const pipelineWorkflowId = workflowInfo().workflowId;
-	const reviewResult = await requestCodeReview(
-		commitSha,
-		pipelineWorkflowId,
-		owner,
-		repo,
-	);
-	state.codeReview = {
-		reviewId: reviewResult.reviewId,
-		approved: false,
-		reviewer: "",
-	};
 
-	// Wait for the code review signal (up to 24 hours)
-	const reviewReceived = await condition(() => codeReviewReceived, "24h");
-	if (!reviewReceived) {
+	await Promise.all([
+		requestCodeReview(commitSha, pipelineWorkflowId, owner, repo),
+		requestSecurityScan(commitSha, pipelineWorkflowId, owner, repo),
+	]);
+
+	// Fan-in: wait until all expected agents have reported back
+	const allAgentsReported = await condition(
+		() => EXPECTED_AGENTS.every((t) => t in state.agentResults),
+		"24h",
+	);
+
+	if (!allAgentsReported) {
 		state.stage = "failed";
-		state.error = "Code review timed out after 24 hours";
+		state.error = "Agent results timed out after 24 hours";
 		return state;
 	}
 
-	if (!state.codeReview.approved) {
+	// Check if all agents approved
+	const rejections = EXPECTED_AGENTS.filter(
+		(t) => !state.agentResults[t].approved,
+	);
+	if (rejections.length > 0) {
 		state.stage = "failed";
-		state.error = `Code review rejected by ${state.codeReview.reviewer}`;
+		state.error = `Rejected by agents: ${rejections.join(", ")}`;
 		return state;
 	}
 

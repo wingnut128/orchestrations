@@ -38,6 +38,9 @@ worker-agent-task: ## Start agent-task worker (needs op for API key)
 worker-code-review: ## Start code review worker (needs op for API key)
 	$(OP_RUN) bun run worker:code-review
 
+worker-security-scan: ## Start security scan worker
+	bun run worker:security-scan
+
 ## Webhook
 webhook: ## Start webhook receiver (needs op for API key)
 	$(OP_RUN) bun run webhook
@@ -54,6 +57,9 @@ demo-agent-task: ## Run agent task demo (start worker-agent-task first)
 
 demo-code-review: ## Run code review agent demo (starts all workers automatically)
 	./scripts/demo-code-review.sh
+
+demo-fan-out: ## Run fan-out/fan-in agent demo (start worker-ci-pipeline + worker-security-scan first)
+	bun run client:fan-out-demo
 
 ## Docker
 docker-build: ## Build Docker image
