@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Client, Connection } from "@temporalio/client";
+import { Client } from "@temporalio/client";
 import { config } from "../config.ts";
+import { createConnection, namespace } from "../temporal-connection.ts";
 import { codeReviewCompleteSignal } from "../workflows/ci-pipeline.ts";
 
 const anthropic = new Anthropic();
@@ -103,10 +104,8 @@ export async function signalPipelineReview(
 		`[activity] signalPipelineReview → workflow ${pipelineWorkflowId}, approved=${approved}`,
 	);
 
-	const connection = await Connection.connect({
-		address: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
-	});
-	const client = new Client({ connection });
+	const connection = await createConnection();
+	const client = new Client({ connection, namespace });
 
 	const handle = client.workflow.getHandle(pipelineWorkflowId);
 	await handle.signal(codeReviewCompleteSignal, {
