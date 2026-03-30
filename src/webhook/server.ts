@@ -1,7 +1,11 @@
 import { Client } from "@temporalio/client";
 import { config } from "../config.ts";
+import { traceActivity } from "../telemetry/instrumentation.ts";
+import { initTracing } from "../telemetry/tracing.ts";
 import { createConnection, namespace } from "../temporal-connection.ts";
 import { verifySignature } from "./verify.ts";
+
+initTracing();
 
 interface ForgejoPushPayload {
 	ref: string;
@@ -33,33 +37,40 @@ const SHA_RE = /^[0-9a-f]{7,40}$/i;
 const NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
 async function handlePush(payload: ForgejoPushPayload): Promise<string> {
-	const headCommit = payload.after;
-	const owner = payload.repository.owner.login;
-	const repo = payload.repository.name;
-	const branch = payload.ref.replace("refs/heads/", "");
+	return traceActivity("webhook.handlePush", async (span) => {
+		const headCommit = payload.after;
+		const owner = payload.repository.owner.login;
+		const repo = payload.repository.name;
+		const branch = payload.ref.replace("refs/heads/", "");
 
-	if (!SHA_RE.test(headCommit)) {
-		throw new Error(`Invalid commit SHA: ${headCommit.slice(0, 20)}`);
-	}
-	if (!NAME_RE.test(owner) || !NAME_RE.test(repo)) {
-		throw new Error(`Invalid owner/repo: ${owner}/${repo}`);
-	}
+		if (!SHA_RE.test(headCommit)) {
+			throw new Error(`Invalid commit SHA: ${headCommit.slice(0, 20)}`);
+		}
+		if (!NAME_RE.test(owner) || !NAME_RE.test(repo)) {
+			throw new Error(`Invalid owner/repo: ${owner}/${repo}`);
+		}
 
-	console.log(
-		`[webhook] push to ${owner}/${repo}#${branch} — head commit ${headCommit}`,
-	);
+		span.setAttribute("git.commit_sha", headCommit);
+		span.setAttribute("git.repository", `${owner}/${repo}`);
+		span.setAttribute("git.branch", branch);
 
-	const client = await getTemporalClient();
-	const workflowId = `ci-pipeline-${headCommit.slice(0, 12)}-${Date.now()}`;
+		console.log(
+			`[webhook] push to ${owner}/${repo}#${branch} — head commit ${headCommit}`,
+		);
 
-	await client.workflow.start("ciPipelineWorkflow", {
-		taskQueue: "ci-pipeline",
-		workflowId,
-		args: [{ commitSha: headCommit, owner, repo }],
+		const client = await getTemporalClient();
+		const workflowId = `ci-pipeline-${headCommit.slice(0, 12)}-${Date.now()}`;
+
+		await client.workflow.start("ciPipelineWorkflow", {
+			taskQueue: "ci-pipeline",
+			workflowId,
+			args: [{ commitSha: headCommit, owner, repo }],
+		});
+
+		span.setAttribute("workflow.id", workflowId);
+		console.log(`[webhook] started workflow ${workflowId}`);
+		return workflowId;
 	});
-
-	console.log(`[webhook] started workflow ${workflowId}`);
-	return workflowId;
 }
 
 if (!config.webhook.secret) {

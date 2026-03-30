@@ -2,9 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Client } from "@temporalio/client";
 import { config } from "../config.ts";
 import { agentResultSignal } from "../signals/agent-protocol.ts";
+import {
+	traceActivity,
+	traceClaudeCall,
+} from "../telemetry/instrumentation.ts";
 import { createConnection, namespace } from "../temporal-connection.ts";
 
 const anthropic = new Anthropic();
+const MODEL = "claude-sonnet-4-6";
 
 /**
  * Fetch a commit diff from the Forgejo API.
@@ -17,37 +22,45 @@ export async function fetchDiff(
 	owner?: string,
 	repo?: string,
 ): Promise<string> {
-	const repoOwner = owner ?? process.env.FORGEJO_REPO_OWNER ?? "";
-	const repoName = repo ?? process.env.FORGEJO_REPO_NAME ?? "";
+	return traceActivity("forgejo.fetchDiff", async (span) => {
+		const repoOwner = owner ?? process.env.FORGEJO_REPO_OWNER ?? "";
+		const repoName = repo ?? process.env.FORGEJO_REPO_NAME ?? "";
 
-	if (!repoOwner || !repoName) {
-		throw new Error(
-			"fetchDiff requires owner/repo — set FORGEJO_REPO_OWNER and FORGEJO_REPO_NAME or pass them as arguments",
+		if (!repoOwner || !repoName) {
+			throw new Error(
+				"fetchDiff requires owner/repo — set FORGEJO_REPO_OWNER and FORGEJO_REPO_NAME or pass them as arguments",
+			);
+		}
+
+		span.setAttribute("git.commit_sha", commitSha);
+		span.setAttribute("git.repository", `${repoOwner}/${repoName}`);
+
+		const url = `${config.forgejo.url}/api/v1/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/git/commits/${encodeURIComponent(commitSha)}.diff`;
+
+		console.log(`[activity] fetchDiff GET ${url}`);
+
+		const headers: Record<string, string> = {
+			Accept: "text/plain",
+		};
+		if (config.forgejo.token) {
+			headers.Authorization = `token ${config.forgejo.token}`;
+		}
+
+		const response = await fetch(url, { headers });
+
+		if (!response.ok) {
+			throw new Error(
+				`Forgejo API error: ${response.status} ${response.statusText} — ${url}`,
+			);
+		}
+
+		const diff = await response.text();
+		span.setAttribute("diff.length", diff.length);
+		console.log(
+			`[activity] fetchDiff got ${diff.length} chars for ${commitSha}`,
 		);
-	}
-
-	const url = `${config.forgejo.url}/api/v1/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/git/commits/${encodeURIComponent(commitSha)}.diff`;
-
-	console.log(`[activity] fetchDiff GET ${url}`);
-
-	const headers: Record<string, string> = {
-		Accept: "text/plain",
-	};
-	if (config.forgejo.token) {
-		headers.Authorization = `token ${config.forgejo.token}`;
-	}
-
-	const response = await fetch(url, { headers });
-
-	if (!response.ok) {
-		throw new Error(
-			`Forgejo API error: ${response.status} ${response.statusText} — ${url}`,
-		);
-	}
-
-	const diff = await response.text();
-	console.log(`[activity] fetchDiff got ${diff.length} chars for ${commitSha}`);
-	return diff;
+		return diff;
+	});
 }
 
 export async function reviewDiff(
@@ -69,30 +82,43 @@ Return ONLY a valid JSON object with exactly two fields:
 
 Do not include any text outside the JSON object. Do not wrap it in markdown code fences.`;
 
-	const response = await anthropic.messages.create({
-		model: "claude-sonnet-4-6",
-		max_tokens: 1024,
-		system: systemPrompt,
-		messages: [
-			{
-				role: "user",
-				content: `Please review the following diff:\n\n${diff}`,
-			},
-		],
-	});
+	return traceClaudeCall(
+		"claude.reviewDiff",
+		{ model: MODEL, messageCount: 1 },
+		async (span) => {
+			const response = await anthropic.messages.create({
+				model: MODEL,
+				max_tokens: 1024,
+				system: systemPrompt,
+				messages: [
+					{
+						role: "user",
+						content: `Please review the following diff:\n\n${diff}`,
+					},
+				],
+			});
 
-	const text = response.content
-		.filter((block): block is Anthropic.TextBlock => block.type === "text")
-		.map((block) => block.text)
-		.join("\n");
+			const text = response.content
+				.filter((block): block is Anthropic.TextBlock => block.type === "text")
+				.map((block) => block.text)
+				.join("\n");
 
-	console.log(`[activity] Claude review response: ${text}`);
+			span.setAttribute("ai.usage.input_tokens", response.usage.input_tokens);
+			span.setAttribute("ai.usage.output_tokens", response.usage.output_tokens);
 
-	const parsed = JSON.parse(text) as { approved: boolean; feedback: string };
-	return {
-		approved: parsed.approved,
-		feedback: parsed.feedback,
-	};
+			console.log(`[activity] Claude review response: ${text}`);
+
+			const parsed = JSON.parse(text) as {
+				approved: boolean;
+				feedback: string;
+			};
+			span.setAttribute("review.approved", parsed.approved);
+			return {
+				approved: parsed.approved,
+				feedback: parsed.feedback,
+			};
+		},
+	);
 }
 
 export async function signalPipelineReview(
@@ -100,20 +126,25 @@ export async function signalPipelineReview(
 	approved: boolean,
 	feedback: string,
 ): Promise<void> {
-	console.log(
-		`[activity] signalPipelineReview → workflow ${pipelineWorkflowId}, approved=${approved}`,
-	);
+	return traceActivity("temporal.signalPipelineReview", async (span) => {
+		span.setAttribute("workflow.id", pipelineWorkflowId);
+		span.setAttribute("review.approved", approved);
 
-	const connection = await createConnection();
-	const client = new Client({ connection, namespace });
+		console.log(
+			`[activity] signalPipelineReview → workflow ${pipelineWorkflowId}, approved=${approved}`,
+		);
 
-	const handle = client.workflow.getHandle(pipelineWorkflowId);
-	await handle.signal(agentResultSignal, {
-		agentType: "code-review",
-		approved,
-		agent: "claude-review-agent",
-		details: feedback,
+		const connection = await createConnection();
+		const client = new Client({ connection, namespace });
+
+		const handle = client.workflow.getHandle(pipelineWorkflowId);
+		await handle.signal(agentResultSignal, {
+			agentType: "code-review",
+			approved,
+			agent: "claude-review-agent",
+			details: feedback,
+		});
+
+		console.log("[activity] signalPipelineReview sent successfully");
 	});
-
-	console.log("[activity] signalPipelineReview sent successfully");
 }

@@ -7,6 +7,21 @@
  *   FORGEJO_TOKEN     — Forgejo API token (generate at /user/settings/applications)
  *   WEBHOOK_PORT      — Port for the webhook receiver (default: 4000)
  *   WEBHOOK_SECRET    — Shared secret for Forgejo webhook HMAC validation
+ *
+ * OpenTelemetry (optional):
+ *   OTEL_ENABLED                    — Set to "true" to enable tracing
+ *   OTEL_EXPORTER_OTLP_ENDPOINT    — OTLP HTTP endpoint (default: http://localhost:4318)
+ *   OTEL_EXPORTER_OTLP_HEADERS     — Headers for OTLP exporter (e.g. auth tokens)
+ *   OTEL_SERVICE_NAME              — Service name for traces (default: orchestrations)
+ *
+ * Local dev (Jaeger):
+ *   OTEL_ENABLED=true
+ *   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+ *
+ * Honeycomb:
+ *   OTEL_ENABLED=true
+ *   OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
+ *   OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<your-api-key>
  */
 
 export const config = {
@@ -29,5 +44,11 @@ export const config = {
 	webhook: {
 		port: Number.parseInt(process.env.WEBHOOK_PORT ?? "4000", 10),
 		secret: process.env.WEBHOOK_SECRET ?? "",
+	},
+	otel: {
+		enabled: process.env.OTEL_ENABLED === "true",
+		endpoint:
+			process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318",
+		serviceName: process.env.OTEL_SERVICE_NAME ?? "orchestrations",
 	},
 } as const;

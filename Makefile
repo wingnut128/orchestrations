@@ -58,6 +58,9 @@ demo-agent-task: ## Run agent task demo (start worker-agent-task first)
 demo-code-review: ## Run code review agent demo (starts all workers automatically)
 	./scripts/demo-code-review.sh
 
+demo-multi-turn: ## Run multi-turn agent conversation demo (start worker-agent-task first)
+	$(OP_RUN) bun run client:multi-turn-demo
+
 demo-fan-out: ## Run fan-out/fan-in agent demo (start worker-ci-pipeline + worker-security-scan first)
 	bun run client:fan-out-demo
 
@@ -71,12 +74,13 @@ docker-up: ## Start all services with Docker Compose
 docker-down: ## Stop all Docker Compose services
 	docker compose down
 
-## Local Dev Environment (Forgejo + Temporal)
-dev-up: ## Start Forgejo + Temporal (local dev infra)
-	docker compose up -d forgejo temporal temporal-ui
+## Local Dev Environment (Forgejo + Temporal + Jaeger)
+dev-up: ## Start Forgejo + Temporal + Jaeger (local dev infra)
+	docker compose up -d forgejo temporal temporal-ui jaeger
 	@echo ""
 	@echo "  Forgejo:      http://localhost:3000"
 	@echo "  Temporal UI:  http://localhost:8233"
+	@echo "  Jaeger UI:    http://localhost:16686"
 	@echo ""
 	@echo "  First time? Register at http://localhost:3000/user/sign_up"
 	@echo "  (first registered user becomes admin)"
