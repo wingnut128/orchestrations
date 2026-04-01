@@ -2,9 +2,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "@temporalio/worker";
 import * as activities from "../activities/greeter.ts";
+import { initTracing, shutdownTracing } from "../telemetry/tracing.ts";
 import { createNativeConnection, namespace } from "../temporal-connection.ts";
 
 async function run() {
+	initTracing();
 	const connection = await createNativeConnection();
 
 	// Resolve workflow path relative to this file.
@@ -28,7 +30,9 @@ async function run() {
 	await worker.run();
 }
 
-run().catch((err) => {
-	console.error("Worker failed:", err);
-	process.exit(1);
-});
+run()
+	.catch((err) => {
+		console.error("Worker failed:", err);
+		process.exit(1);
+	})
+	.finally(() => shutdownTracing());

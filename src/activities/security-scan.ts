@@ -6,6 +6,7 @@ import { Client } from "@temporalio/client";
 import { ApplicationFailure } from "@temporalio/common";
 import { config } from "../config.ts";
 import { agentResultSignal } from "../signals/agent-protocol.ts";
+import { traceActivity } from "../telemetry/instrumentation.ts";
 import { createConnection, namespace } from "../temporal-connection.ts";
 
 export interface ScanFindings {
@@ -157,24 +158,35 @@ export async function scanForVulnerabilities(
 	owner: string,
 	repo: string,
 ): Promise<ScanFindings> {
-	console.log(
-		`[activity] security scan started for ${owner}/${repo}@${commitSha.slice(0, 7)}`,
-	);
+	return traceActivity("snyk.scanForVulnerabilities", async (span) => {
+		span.setAttribute("git.commit_sha", commitSha);
+		span.setAttribute("git.repository", `${owner}/${repo}`);
 
-	let tempDir: string | undefined;
-	try {
-		tempDir = await cloneRepo(owner, repo, commitSha);
-		const repoDir = join(tempDir, "repo");
-		const findings = await runSnykTest(repoDir);
-		console.log(`[activity] security scan complete: ${findings.summary}`);
-		return findings;
-	} finally {
-		if (tempDir) {
-			await rm(tempDir, { recursive: true, force: true }).catch((err) =>
-				console.warn(`[activity] failed to clean up ${tempDir}: ${err}`),
-			);
+		console.log(
+			`[activity] security scan started for ${owner}/${repo}@${commitSha.slice(0, 7)}`,
+		);
+
+		let tempDir: string | undefined;
+		try {
+			tempDir = await cloneRepo(owner, repo, commitSha);
+			const repoDir = join(tempDir, "repo");
+			const findings = await runSnykTest(repoDir);
+
+			span.setAttribute("scan.critical", findings.critical);
+			span.setAttribute("scan.high", findings.high);
+			span.setAttribute("scan.medium", findings.medium);
+			span.setAttribute("scan.low", findings.low);
+
+			console.log(`[activity] security scan complete: ${findings.summary}`);
+			return findings;
+		} finally {
+			if (tempDir) {
+				await rm(tempDir, { recursive: true, force: true }).catch((err) =>
+					console.warn(`[activity] failed to clean up ${tempDir}: ${err}`),
+				);
+			}
 		}
-	}
+	});
 }
 
 export async function signalPipelineScanResult(
@@ -182,20 +194,25 @@ export async function signalPipelineScanResult(
 	approved: boolean,
 	details: string,
 ): Promise<void> {
-	console.log(
-		`[activity] signalPipelineScanResult → workflow ${pipelineWorkflowId}, approved=${approved}`,
-	);
+	return traceActivity("temporal.signalPipelineScanResult", async (span) => {
+		span.setAttribute("workflow.id", pipelineWorkflowId);
+		span.setAttribute("scan.approved", approved);
 
-	const connection = await createConnection();
-	const client = new Client({ connection, namespace });
+		console.log(
+			`[activity] signalPipelineScanResult → workflow ${pipelineWorkflowId}, approved=${approved}`,
+		);
 
-	const handle = client.workflow.getHandle(pipelineWorkflowId);
-	await handle.signal(agentResultSignal, {
-		agentType: "security-scan",
-		approved,
-		agent: "security-scan-agent",
-		details,
+		const connection = await createConnection();
+		const client = new Client({ connection, namespace });
+
+		const handle = client.workflow.getHandle(pipelineWorkflowId);
+		await handle.signal(agentResultSignal, {
+			agentType: "security-scan",
+			approved,
+			agent: "security-scan-agent",
+			details,
+		});
+
+		console.log("[activity] signalPipelineScanResult sent successfully");
 	});
-
-	console.log("[activity] signalPipelineScanResult sent successfully");
 }

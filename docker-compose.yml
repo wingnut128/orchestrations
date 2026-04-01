@@ -60,14 +60,27 @@ services:
     depends_on:
       - temporal
 
+  # ── Jaeger (distributed tracing) ──────────────────────────────
+  jaeger:
+    image: jaegertracing/jaeger:2
+    ports:
+      - "16686:16686" # Web UI
+      - "4318:4318" # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+
   # ── Workers ──────────────────────────────────────────────────
   worker-greeter:
     build: .
     command: ["dist/workers/greeter.js"]
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - temporal
+      - jaeger
     restart: on-failure
 
   worker-ci-pipeline:
@@ -75,8 +88,11 @@ services:
     command: ["dist/workers/ci-pipeline.js"]
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - temporal
+      - jaeger
     restart: on-failure
 
   worker-agent-task:
@@ -85,8 +101,11 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - temporal
+      - jaeger
     restart: on-failure
 
   worker-code-review:
@@ -97,9 +116,12 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FORGEJO_URL=http://forgejo:3000
       - FORGEJO_TOKEN=${FORGEJO_TOKEN}
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - temporal
       - forgejo
+      - jaeger
     restart: on-failure
 
   worker-security-scan:
@@ -110,9 +132,12 @@ services:
       - SNYK_TOKEN=${SNYK_TOKEN}
       - FORGEJO_URL=http://forgejo:3000
       - FORGEJO_TOKEN=${FORGEJO_TOKEN}
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - temporal
       - forgejo
+      - jaeger
     restart: on-failure
 
 volumes:

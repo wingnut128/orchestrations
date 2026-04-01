@@ -15,6 +15,7 @@
 		"worker:security-scan": "bun run src/workers/security-scan.ts",
 		"client:code-review-demo": "bun run src/clients/run-code-review-demo.ts",
 		"client:fan-out-demo": "bun run src/clients/run-fan-out-demo.ts",
+		"client:multi-turn-demo": "bun run src/clients/run-multi-turn-demo.ts",
 		"webhook": "bun run src/webhook/server.ts",
 		"check": "biome check",
 		"check:fix": "biome check --write",
