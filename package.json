@@ -29,7 +29,7 @@
 		"typescript": "^5"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.80.0",
+		"@anthropic-ai/sdk": "^0.82.0",
 		"@temporalio/activity": "^1.15.0",
 		"@temporalio/client": "^1.15.0",
 		"@temporalio/worker": "^1.15.0",
