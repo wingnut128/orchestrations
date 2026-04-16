@@ -33,7 +33,7 @@ interface SnykOutput {
 
 // --- Helpers ---
 
-function runCommand(
+export function runCommand(
 	cmd: string,
 	args: string[],
 	opts?: { cwd?: string; timeoutMs?: number },
@@ -93,21 +93,29 @@ async function cloneRepo(
 		);
 	}
 
-	const checkoutResult = await runCommand("git", [
-		"-C",
-		repoDir,
-		"checkout",
-		"--",
-		commitSha,
-	]);
-	if (checkoutResult.exitCode !== 0) {
-		throw new Error(
-			`git checkout ${commitSha} failed (exit ${checkoutResult.exitCode}): ${checkoutResult.stderr}`,
-		);
-	}
+	await checkoutCommit(repoDir, commitSha);
 
 	console.log(`[activity] cloned ${owner}/${repo}@${commitSha.slice(0, 7)}`);
 	return tempDir;
+}
+
+export async function checkoutCommit(
+	repoDir: string,
+	commitSha: string,
+): Promise<void> {
+	const result = await runCommand("git", [
+		"-C",
+		repoDir,
+		"-c",
+		"advice.detachedHead=false",
+		"checkout",
+		commitSha,
+	]);
+	if (result.exitCode !== 0) {
+		throw new Error(
+			`git checkout ${commitSha} failed (exit ${result.exitCode}): ${result.stderr}`,
+		);
+	}
 }
 
 async function runSnykTest(repoDir: string): Promise<ScanFindings> {
