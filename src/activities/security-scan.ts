@@ -2,12 +2,11 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@temporalio/client";
 import { ApplicationFailure } from "@temporalio/common";
 import { config } from "../config.ts";
 import { agentResultSignal } from "../signals/agent-protocol.ts";
 import { traceActivity } from "../telemetry/instrumentation.ts";
-import { createConnection, namespace } from "../temporal-connection.ts";
+import { getSharedClient } from "../temporal-connection.ts";
 
 export interface ScanFindings {
 	critical: number;
@@ -210,9 +209,7 @@ export async function signalPipelineScanResult(
 			`[activity] signalPipelineScanResult → workflow ${pipelineWorkflowId}, approved=${approved}`,
 		);
 
-		const connection = await createConnection();
-		const client = new Client({ connection, namespace });
-
+		const client = await getSharedClient();
 		const handle = client.workflow.getHandle(pipelineWorkflowId);
 		await handle.signal(agentResultSignal, {
 			agentType: "security-scan",

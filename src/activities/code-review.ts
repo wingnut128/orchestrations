@@ -1,12 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Client } from "@temporalio/client";
 import { config } from "../config.ts";
 import { agentResultSignal } from "../signals/agent-protocol.ts";
 import {
 	traceActivity,
 	traceClaudeCall,
 } from "../telemetry/instrumentation.ts";
-import { createConnection, namespace } from "../temporal-connection.ts";
+import { getSharedClient } from "../temporal-connection.ts";
 
 const anthropic = new Anthropic();
 const MODEL = "claude-sonnet-4-6";
@@ -134,9 +133,7 @@ export async function signalPipelineReview(
 			`[activity] signalPipelineReview → workflow ${pipelineWorkflowId}, approved=${approved}`,
 		);
 
-		const connection = await createConnection();
-		const client = new Client({ connection, namespace });
-
+		const client = await getSharedClient();
 		const handle = client.workflow.getHandle(pipelineWorkflowId);
 		await handle.signal(agentResultSignal, {
 			agentType: "code-review",

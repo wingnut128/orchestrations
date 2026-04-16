@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { Connection } from "@temporalio/client";
+import { Client, Connection } from "@temporalio/client";
 import { NativeConnection } from "@temporalio/worker";
 import { config } from "./config.ts";
 
@@ -43,4 +43,23 @@ export async function createConnection(): Promise<Connection> {
 export async function createNativeConnection(): Promise<NativeConnection> {
 	const opts = await buildConnectionOpts();
 	return NativeConnection.connect(opts);
+}
+
+/**
+ * Lazily create and cache a shared Temporal Client for the current
+ * process. Subsequent calls return the same Client, reusing its
+ * underlying gRPC Connection. Use this from activities and the webhook
+ * server instead of calling `createConnection()` + `new Client()` per
+ * invocation.
+ */
+let sharedClientPromise: Promise<Client> | null = null;
+
+export function getSharedClient(): Promise<Client> {
+	if (!sharedClientPromise) {
+		sharedClientPromise = (async () => {
+			const connection = await createConnection();
+			return new Client({ connection, namespace });
+		})();
+	}
+	return sharedClientPromise;
 }
