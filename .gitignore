@@ -35,6 +35,7 @@ credentials.json
 # IDEs
 .idea
 .vscode/
+.claude/settings.local.json
 
 # OS files
 .DS_Store
