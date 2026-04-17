@@ -78,6 +78,8 @@ RUN bun install --frozen-lockfile --production
 # ──────────────────────────────────────────────────────────────
 FROM cgr.dev/chainguard/node:latest-dev
 
+USER nonroot
+
 WORKDIR /app
 
 # Copy production node_modules (includes native addons like @temporalio/core-bridge)
