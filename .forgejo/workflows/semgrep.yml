@@ -12,11 +12,8 @@ jobs:
   semgrep:
     name: Scan
     runs-on: docker
+    container:
+      image: forgejo.cloudreaper.local:8888/mike/ci-tools:latest
     steps:
       - uses: actions/checkout@v6
-      - name: Install Semgrep
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends python3-pip
-          pip install --break-system-packages --timeout 120 --retries 5 semgrep
       - run: semgrep scan --config auto --error
