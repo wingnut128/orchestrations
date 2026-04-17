@@ -98,5 +98,6 @@ ENV WORKER_NAME=greeter
 # Because the runtime image has no shell, use the exec form and
 # point directly at the node binary. The CMD provides the default
 # worker; override it in docker-compose or at run time.
+USER nonroot
 ENTRYPOINT ["node"]
 CMD ["dist/workers/greeter.js"]

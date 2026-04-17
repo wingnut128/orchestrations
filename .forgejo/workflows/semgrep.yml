@@ -18,5 +18,5 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends python3-pip
-          pip install --break-system-packages semgrep
+          pip install --break-system-packages --timeout 120 --retries 5 semgrep
       - run: semgrep scan --config auto --error
