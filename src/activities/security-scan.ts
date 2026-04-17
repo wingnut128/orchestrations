@@ -139,13 +139,16 @@ async function runSnykTest(repoDir: string): Promise<ScanFindings> {
 }
 
 export function parseSnykOutput(stdout: string): ScanFindings {
-	const parsed = JSON.parse(stdout) as SnykOutput;
+	const parsed = JSON.parse(stdout) as SnykOutput | SnykOutput[];
+	const projects = Array.isArray(parsed) ? parsed : [parsed];
 	const counts = { critical: 0, high: 0, medium: 0, low: 0 };
 
-	for (const vuln of parsed.vulnerabilities) {
-		const sev = vuln.severity as keyof typeof counts;
-		if (sev in counts) {
-			counts[sev]++;
+	for (const project of projects) {
+		for (const vuln of project.vulnerabilities ?? []) {
+			const sev = vuln.severity as keyof typeof counts;
+			if (sev in counts) {
+				counts[sev]++;
+			}
 		}
 	}
 

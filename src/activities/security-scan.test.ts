@@ -142,4 +142,70 @@ describe("parseSnykOutput", () => {
 			"Found 1 vulnerabilities: 1 critical, 0 high, 0 medium, 0 low",
 		);
 	});
+
+	test("sums vulnerabilities across multi-project output (array shape)", () => {
+		const input = JSON.stringify([
+			{
+				ok: false,
+				vulnerabilities: [
+					{
+						id: "SNYK-A1",
+						severity: "critical",
+						title: "RCE",
+						packageName: "foo",
+						version: "1.0.0",
+					},
+					{
+						id: "SNYK-A2",
+						severity: "high",
+						title: "SQLi",
+						packageName: "bar",
+						version: "1.0.0",
+					},
+				],
+			},
+			{
+				ok: false,
+				vulnerabilities: [
+					{
+						id: "SNYK-B1",
+						severity: "high",
+						title: "XSS",
+						packageName: "baz",
+						version: "1.0.0",
+					},
+					{
+						id: "SNYK-B2",
+						severity: "medium",
+						title: "Info",
+						packageName: "qux",
+						version: "1.0.0",
+					},
+				],
+			},
+		]);
+
+		const result = parseSnykOutput(input);
+
+		expect(result.critical).toBe(1);
+		expect(result.high).toBe(2);
+		expect(result.medium).toBe(1);
+		expect(result.low).toBe(0);
+		expect(result.summary).toBe(
+			"Found 4 vulnerabilities: 1 critical, 2 high, 1 medium, 0 low",
+		);
+	});
+
+	test("multi-project output with all clean projects", () => {
+		const input = JSON.stringify([
+			{ ok: true, vulnerabilities: [] },
+			{ ok: true, vulnerabilities: [] },
+		]);
+
+		const result = parseSnykOutput(input);
+
+		expect(result.critical).toBe(0);
+		expect(result.high).toBe(0);
+		expect(result.summary).toBe("No vulnerabilities found");
+	});
 });
