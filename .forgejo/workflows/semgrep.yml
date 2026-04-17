@@ -12,8 +12,11 @@ jobs:
   semgrep:
     name: Scan
     runs-on: docker
-    container:
-      image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v6
+      - name: Install Semgrep
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3-pip
+          pip install --break-system-packages semgrep
       - run: semgrep scan --config auto --error
