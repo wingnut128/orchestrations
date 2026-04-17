@@ -1,0 +1,19 @@
+name: Semgrep
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  semgrep:
+    name: Scan
+    runs-on: docker
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v6
+      - run: semgrep scan --config auto --error
