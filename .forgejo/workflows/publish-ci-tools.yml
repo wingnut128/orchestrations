@@ -1,11 +1,11 @@
-name: Publish Semgrep CI image
+name: Publish CI tools image
 
 on:
   push:
     branches: [main]
     paths:
-      - "ci/semgrep.Dockerfile"
-      - ".forgejo/workflows/publish-semgrep-image.yml"
+      - "ci/ci-tools.Dockerfile"
+      - ".forgejo/workflows/publish-ci-tools.yml"
   workflow_dispatch:
 
 jobs:
@@ -25,6 +25,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ci/semgrep.Dockerfile
+          file: ci/ci-tools.Dockerfile
           push: true
-          tags: forgejo.cloudreaper.local:8888/mike/semgrep-ci:latest
+          tags: forgejo.cloudreaper.local:8888/mike/ci-tools:latest
