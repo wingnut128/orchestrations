@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { verifySignature } from "./verify.ts";
 
 // These tests exercise the verification primitive directly. Full
@@ -8,10 +8,9 @@ import { verifySignature } from "./verify.ts";
 // future e2e suite.
 
 describe("verifySignature", () => {
-	const secret = "s3cret";
+	const secret = randomBytes(16).toString("hex");
 
 	function sign(body: string) {
-		// nosemgrep: javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key — test fixture
 		return createHmac("sha256", secret).update(body).digest("hex");
 	}
 
