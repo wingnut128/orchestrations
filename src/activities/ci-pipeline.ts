@@ -57,12 +57,8 @@ export async function requestCodeReview(
 		`[activity] code review requested for ${owner}/${repo}@${commitSha.slice(0, 7)} (pipeline: ${pipelineWorkflowId})`,
 	);
 
-	const { Client } = await import("@temporalio/client");
-	const { createConnection, namespace } = await import(
-		"../temporal-connection.ts"
-	);
-	const connection = await createConnection();
-	const client = new Client({ connection, namespace });
+	const { getSharedClient } = await import("../temporal-connection.ts");
+	const client = await getSharedClient();
 
 	const reviewWorkflowId = `code-review-${commitSha.slice(0, 12)}-${Date.now()}`;
 
@@ -89,12 +85,8 @@ export async function requestSecurityScan(
 		`[activity] security scan requested for ${owner}/${repo}@${commitSha.slice(0, 7)} (pipeline: ${pipelineWorkflowId})`,
 	);
 
-	const { Client } = await import("@temporalio/client");
-	const { createConnection, namespace } = await import(
-		"../temporal-connection.ts"
-	);
-	const connection = await createConnection();
-	const client = new Client({ connection, namespace });
+	const { getSharedClient } = await import("../temporal-connection.ts");
+	const client = await getSharedClient();
 
 	const scanWorkflowId = `security-scan-${commitSha.slice(0, 12)}-${Date.now()}`;
 
