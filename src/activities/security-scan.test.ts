@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseSnykOutput } from "./security-scan.ts";
+import { buildCloneUrl, parseSnykOutput } from "./security-scan.ts";
 
 describe("parseSnykOutput", () => {
 	test("clean scan with no vulnerabilities", () => {
@@ -207,5 +207,39 @@ describe("parseSnykOutput", () => {
 		expect(result.critical).toBe(0);
 		expect(result.high).toBe(0);
 		expect(result.summary).toBe("No vulnerabilities found");
+	});
+});
+
+describe("buildCloneUrl", () => {
+	test("builds a basic clone URL", () => {
+		expect(buildCloneUrl("http://localhost:3000", "tok", "o", "r")).toBe(
+			"http://tok@localhost:3000/o/r.git",
+		);
+	});
+
+	test("preserves a path prefix on the Forgejo base URL", () => {
+		expect(
+			buildCloneUrl("https://git.example.com/forge", "tok", "o", "r"),
+		).toBe("https://tok@git.example.com/forge/o/r.git");
+	});
+
+	test("handles a trailing slash on the base URL", () => {
+		expect(
+			buildCloneUrl("https://git.example.com/forge/", "tok", "o", "r"),
+		).toBe("https://tok@git.example.com/forge/o/r.git");
+	});
+
+	test("url-encodes tokens containing reserved characters", () => {
+		// Tokens can contain '@', ':' or '/' which would otherwise corrupt
+		// the userinfo portion of the URL and make git misparse the host.
+		const url = buildCloneUrl(
+			"https://git.example.com",
+			"abc:@def/123",
+			"o",
+			"r",
+		);
+		expect(url).toContain("abc%3A%40def%2F123@git.example.com");
+		// Host must still parse as just the hostname, not part of the token
+		expect(new URL(url).host).toBe("git.example.com");
 	});
 });

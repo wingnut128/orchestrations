@@ -58,6 +58,19 @@ export function runCommand(
 	});
 }
 
+export function buildCloneUrl(
+	base: string,
+	token: string,
+	owner: string,
+	repo: string,
+): string {
+	const url = new URL(base);
+	url.username = encodeURIComponent(token);
+	const basePath = url.pathname.replace(/\/$/, "");
+	url.pathname = `${basePath}/${owner}/${repo}.git`;
+	return url.toString();
+}
+
 async function cloneRepo(
 	owner: string,
 	repo: string,
@@ -70,9 +83,8 @@ async function cloneRepo(
 		);
 	}
 
-	const baseUrl = new URL(config.forgejo.url);
-	const cloneUrl = `${baseUrl.protocol}//${token}@${baseUrl.host}/${owner}/${repo}.git`;
-	const sanitizedUrl = cloneUrl.replace(token, "***");
+	const cloneUrl = buildCloneUrl(config.forgejo.url, token, owner, repo);
+	const sanitizedUrl = cloneUrl.replace(encodeURIComponent(token), "***");
 
 	const tempDir = await mkdtemp(join(tmpdir(), "snyk-scan-"));
 	const repoDir = join(tempDir, "repo");
@@ -86,7 +98,9 @@ async function cloneRepo(
 		repoDir,
 	]);
 	if (cloneResult.exitCode !== 0) {
-		const sanitizedStderr = cloneResult.stderr.replaceAll(token, "***");
+		const sanitizedStderr = cloneResult.stderr
+			.replaceAll(token, "***")
+			.replaceAll(encodeURIComponent(token), "***");
 		throw new Error(
 			`git clone failed (exit ${cloneResult.exitCode}): ${sanitizedStderr}`,
 		);

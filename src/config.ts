@@ -24,6 +24,21 @@
  *   OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<your-api-key>
  */
 
+export function parsePort(
+	value: string | undefined,
+	fallback: number,
+	varName: string,
+): number {
+	if (value === undefined || value === "") return fallback;
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+		throw new Error(
+			`${varName} must be an integer in [1, 65535], got: ${value}`,
+		);
+	}
+	return parsed;
+}
+
 export const config = {
 	temporal: {
 		address: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
@@ -42,7 +57,7 @@ export const config = {
 		token: process.env.FORGEJO_TOKEN ?? "",
 	},
 	webhook: {
-		port: Number.parseInt(process.env.WEBHOOK_PORT ?? "4000", 10),
+		port: parsePort(process.env.WEBHOOK_PORT, 4000, "WEBHOOK_PORT"),
 		secret: process.env.WEBHOOK_SECRET ?? "",
 	},
 	otel: {
