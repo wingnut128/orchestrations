@@ -36,6 +36,7 @@ credentials.json
 .idea
 .vscode/
 .claude/settings.local.json
+.serena/
 
 # OS files
 .DS_Store
