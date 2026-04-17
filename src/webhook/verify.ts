@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+const HEX_SHA256_RE = /^[0-9a-fA-F]{64}$/;
+
 /**
  * Verify a Forgejo webhook HMAC-SHA256 signature.
  *
@@ -11,11 +13,10 @@ export function verifySignature(
 	signature: string,
 	secret: string,
 ): boolean {
-	if (!signature) return false;
+	if (!HEX_SHA256_RE.test(signature)) return false;
 
-	const expected = createHmac("sha256", secret).update(body).digest("hex");
+	const expected = createHmac("sha256", secret).update(body).digest();
+	const received = Buffer.from(signature, "hex");
 
-	if (expected.length !== signature.length) return false;
-
-	return timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+	return timingSafeEqual(expected, received);
 }
