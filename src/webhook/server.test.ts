@@ -8,10 +8,10 @@ import { verifySignature } from "./verify.ts";
 // future e2e suite.
 
 describe("verifySignature", () => {
-	// nosemgrep: generic.secrets.security.detected-generic-secret — test fixture, not a real credential
 	const secret = "s3cret";
 
 	function sign(body: string) {
+		// nosemgrep: javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key — test fixture
 		return createHmac("sha256", secret).update(body).digest("hex");
 	}
 
