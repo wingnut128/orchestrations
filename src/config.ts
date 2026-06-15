@@ -3,10 +3,8 @@
  *
  * Required env vars:
  *   TEMPORAL_ADDRESS  — Temporal server (default: localhost:7233)
- *   FORGEJO_URL       — Forgejo base URL (default: http://localhost:3000)
- *   FORGEJO_TOKEN     — Forgejo API token (generate at /user/settings/applications)
- *   WEBHOOK_PORT      — Port for the webhook receiver (default: 4000)
- *   WEBHOOK_SECRET    — Shared secret for Forgejo webhook HMAC validation
+ *   GITHUB_TOKEN      — GitHub personal access token or app token
+ *   GITHUB_API_URL    — GitHub API base URL (default: https://api.github.com)
  *
  * OpenTelemetry (optional):
  *   OTEL_ENABLED                    — Set to "true" to enable tracing
@@ -49,16 +47,9 @@ export const config = {
 			keyPath: process.env.TEMPORAL_TLS_KEY_PATH ?? "",
 		},
 	},
-	forgejo: {
-		url: (process.env.FORGEJO_URL ?? "http://localhost:3000").replace(
-			/\/$/,
-			"",
-		),
-		token: process.env.FORGEJO_TOKEN ?? "",
-	},
-	webhook: {
-		port: parsePort(process.env.WEBHOOK_PORT, 4000, "WEBHOOK_PORT"),
-		secret: process.env.WEBHOOK_SECRET ?? "",
+	github: {
+		token: process.env.GITHUB_TOKEN ?? "",
+		apiUrl: process.env.GITHUB_API_URL ?? "https://api.github.com",
 	},
 	otel: {
 		enabled: process.env.OTEL_ENABLED === "true",

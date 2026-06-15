@@ -1,9 +1,4 @@
 services:
-  # ── Forgejo lives outside compose at forgejo.cloudreaper.local:8888 ──
-  # Workers reach it via the x-forgejo YAML anchor below. .local mDNS
-  # doesn't resolve from inside Docker Desktop on macOS, so we pin the
-  # IP via extra_hosts. Update FORGEJO_HOST_IP in .env if the LAN changes.
-
   # ── Temporal persistence (Postgres) ─────────────────────────
   temporal-db:
     image: postgres:18-alpine
@@ -63,60 +58,18 @@ services:
       - jaeger
     restart: on-failure
 
-  worker-ci-pipeline:
+  # The multi-agent code-review worker (orchestrator + worker + verify
+  # child workflows, plus the review/github activities) on the `review` queue.
+  worker-review:
     build: .
-    command: ["dist/workers/ci-pipeline.js"]
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-    depends_on:
-      - temporal
-      - jaeger
-    restart: on-failure
-
-  worker-agent-task:
-    build: .
-    command: ["dist/workers/agent-task.js"]
+    command: ["dist/workers/review.js"]
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_API_URL=${GITHUB_API_URL:-https://api.github.com}
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-    depends_on:
-      - temporal
-      - jaeger
-    restart: on-failure
-
-  worker-code-review:
-    build: .
-    command: ["dist/workers/code-review.js"]
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - FORGEJO_URL=http://forgejo.cloudreaper.local:8888
-      - FORGEJO_TOKEN=${FORGEJO_TOKEN}
-      - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-    extra_hosts:
-      - "forgejo.cloudreaper.local:${FORGEJO_HOST_IP:-192.168.1.30}"
-    depends_on:
-      - temporal
-      - jaeger
-    restart: on-failure
-
-  worker-security-scan:
-    build: .
-    command: ["dist/workers/security-scan.js"]
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - SNYK_TOKEN=${SNYK_TOKEN}
-      - FORGEJO_URL=http://forgejo.cloudreaper.local:8888
-      - FORGEJO_TOKEN=${FORGEJO_TOKEN}
-      - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-    extra_hosts:
-      - "forgejo.cloudreaper.local:${FORGEJO_HOST_IP:-192.168.1.30}"
     depends_on:
       - temporal
       - jaeger
