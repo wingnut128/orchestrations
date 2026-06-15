@@ -1,5 +1,11 @@
-import { describe, expect, test } from "bun:test";
-import { parsePort } from "./config.ts";
+import { describe, expect, it, test } from "bun:test";
+import { config, parsePort } from "./config.ts";
+
+describe("config", () => {
+	it("defaults the GitHub API url", () => {
+		expect(config.github.apiUrl).toBe("https://api.github.com");
+	});
+});
 
 describe("parsePort", () => {
 	test("returns fallback for undefined", () => {
