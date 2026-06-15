@@ -7,6 +7,8 @@
 		"temporal:dev": "temporal server start-dev",
 		"worker:greeter": "bun run src/workers/greeter.ts",
 		"client:greeter": "bun run src/clients/run-greeter.ts",
+		"worker:review": "bun run src/workers/review.ts",
+		"client:pr-review": "bun run src/clients/run-pr-review.ts",
 		"check": "biome check",
 		"check:fix": "biome check --write",
 		"test": "bun test"
