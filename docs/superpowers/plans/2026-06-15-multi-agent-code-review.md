@@ -1528,6 +1528,10 @@ import type { PullRequestContext } from "../github/types.ts";
 import { reviewWorkerWorkflow } from "./review-worker.ts";
 import { verifyFindingWorkflow } from "./verify-finding.ts";
 
+// Child workflows must be exported from the bundle entrypoint so Temporal can
+// instantiate them when they are started via startChild().
+export { reviewWorkerWorkflow, verifyFindingWorkflow };
+
 const VERIFIER_COUNT = 3;
 
 const { fetchPullRequest, checkoutPrToWorkspace, postReviewToGitHub } = proxyActivities<typeof ghActivities>({
@@ -1652,12 +1656,12 @@ function activities(overrides: Record<string, unknown> = {}) {
 			runAgentReview: async () => ({ dimension: "security", findings: [finding], coverageNote: "ok" }),
 			verifyFinding: async () => ({ findingId: "f1", real: true, confidence: 0.9 }),
 			completenessCritic: async () => ({ dimensions: [] }),
-			synthesizeReview: async (confirmed: unknown[]) => ({
-				summary: `${(confirmed as unknown[]).length} confirmed`,
+			synthesizeReview: async (confirmed: unknown[], dropped: unknown[], dimensionErrors: Record<string, string>) => ({
+				summary: `${confirmed.length} confirmed`,
 				confirmed,
-				dropped: [],
-				byDimension: { security: (confirmed as unknown[]).length },
-				dimensionErrors: {},
+				dropped,
+				byDimension: { security: confirmed.length },
+				dimensionErrors,
 				usage: { inputTokens: 0, outputTokens: 0 },
 			}),
 			postReviewToGitHub: async (_o: string, _r: string, _p: number, report: unknown) => { posted = report; },
