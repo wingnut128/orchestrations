@@ -2,7 +2,7 @@
 # Build stage — Chainguard node:latest-dev has shell + package manager
 # Install bun here for dep resolution and TS transpilation
 # ──────────────────────────────────────────────────────────────
-FROM cgr.dev/chainguard/node:latest-dev AS build
+FROM cgr.dev/chainguard/node:latest-dev@sha256:7fe7081cf5939f78dfc281b05d64b1ad0e26eb2e3213676a250fa361b6928034 AS build
 
 WORKDIR /app
 
@@ -76,7 +76,7 @@ RUN bun install --frozen-lockfile --production
 # (needed for security-scan activity: git clone + snyk test)
 # Runs as non-root by default
 # ──────────────────────────────────────────────────────────────
-FROM cgr.dev/chainguard/node:latest-dev
+FROM cgr.dev/chainguard/node:latest-dev@sha256:7fe7081cf5939f78dfc281b05d64b1ad0e26eb2e3213676a250fa361b6928034
 
 WORKDIR /app
 
