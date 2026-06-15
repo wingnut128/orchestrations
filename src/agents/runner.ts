@@ -27,15 +27,36 @@ export interface AgentRunner {
 	run<T>(session: AgentSession): Promise<AgentOutcome<T>>;
 }
 
-/** Lazily-constructed registry so optional providers don't load until used. */
-const registry: Partial<Record<Provider, () => Promise<AgentRunner>>> = {
+/**
+ * Factory for a provider that has no runner yet. Throws an actionable error
+ * pointing at the extension path rather than a generic "not found".
+ */
+function notImplemented(provider: Provider): () => Promise<AgentRunner> {
+	return async () => {
+		throw new Error(
+			`AgentRunner for provider "${provider}" is not implemented. ` +
+				`To add it: create src/agents/${provider}-runner.ts exporting a class that ` +
+				`implements AgentRunner (use claude-runner.ts as the template — wrap the ` +
+				`provider SDK's tool-use loop, expose the neutral coreTools, and validate ` +
+				`structured output), then register its factory in src/agents/runner.ts.`,
+		);
+	};
+}
+
+/**
+ * Lazily-constructed registry so optional providers don't load until used.
+ * `claude` is implemented; `gemini` and `codex` are documented extension
+ * points that fail loudly with guidance until a runner is added.
+ */
+const registry: Record<Provider, () => Promise<AgentRunner>> = {
 	claude: async () =>
 		new (await import("./claude-runner.ts")).ClaudeAgentRunner(),
+	gemini: notImplemented("gemini"),
+	codex: notImplemented("codex"),
 };
 
 export async function getRunner(provider: Provider): Promise<AgentRunner> {
 	const factory = registry[provider];
-	if (!factory)
-		throw new Error(`No AgentRunner registered for provider "${provider}".`);
+	if (!factory) throw new Error(`Unknown provider "${provider}".`);
 	return factory();
 }
