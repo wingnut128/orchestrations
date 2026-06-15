@@ -53,37 +53,46 @@ function activities(overrides: Record<string, unknown> = {}) {
 			}),
 			checkoutPrToWorkspace: async () => "/tmp/wd",
 			planReview: async () => ({
-				dimensions: [
-					{
-						key: "security",
-						rationale: "r",
-						scopePaths: ["a.ts"],
-						provider: "claude",
-					},
-				],
+				plan: {
+					dimensions: [
+						{
+							key: "security",
+							rationale: "r",
+							scopePaths: ["a.ts"],
+							provider: "claude",
+						},
+					],
+				},
+				usage: { inputTokens: 1, outputTokens: 1 },
 			}),
 			runAgentReview: async () => ({
-				dimension: "security",
-				findings: [finding],
-				coverageNote: "ok",
+				findings: {
+					dimension: "security",
+					findings: [finding],
+					coverageNote: "ok",
+				},
+				usage: { inputTokens: 2, outputTokens: 2 },
 			}),
 			verifyFinding: async () => ({
-				findingId: "f1",
-				real: true,
-				confidence: 0.9,
+				verdict: { findingId: "f1", real: true, confidence: 0.9 },
+				usage: { inputTokens: 3, outputTokens: 3 },
 			}),
-			completenessCritic: async () => ({ dimensions: [] }),
+			completenessCritic: async () => ({
+				plan: { dimensions: [] },
+				usage: { inputTokens: 0, outputTokens: 0 },
+			}),
 			synthesizeReview: async (
 				confirmed: unknown[],
 				dropped: unknown[],
 				dimensionErrors: Record<string, string>,
+				priorUsage: { inputTokens: number; outputTokens: number },
 			) => ({
 				summary: `${confirmed.length} confirmed`,
 				confirmed,
 				dropped,
 				byDimension: { security: confirmed.length },
 				dimensionErrors,
-				usage: { inputTokens: 0, outputTokens: 0 },
+				usage: priorUsage,
 			}),
 			postReviewToGitHub: async (
 				_o: string,
@@ -132,14 +141,15 @@ describe("reviewOrchestratorWorkflow", () => {
 		);
 		expect(report.confirmed).toHaveLength(1);
 		expect(a.posted()).not.toBeNull();
+		// usage accumulated: plan {1,1} + worker {2,2} + verify {3,3}
+		expect(report.usage).toEqual({ inputTokens: 6, outputTokens: 6 });
 	});
 
 	it("drops findings the verifiers refute", async () => {
 		const a = activities({
 			verifyFinding: async () => ({
-				findingId: "f1",
-				real: false,
-				confidence: 0.2,
+				verdict: { findingId: "f1", real: false, confidence: 0.2 },
+				usage: { inputTokens: 3, outputTokens: 3 },
 			}),
 		});
 		const report = await runWorker(

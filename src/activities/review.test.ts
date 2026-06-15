@@ -38,7 +38,8 @@ describe("review activities (runner-injected)", () => {
 			ctx,
 			() => {},
 		);
-		expect(result.findings[0].id).toBe("f1");
+		expect(result.findings.findings[0].id).toBe("f1");
+		expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
 	});
 
 	it("runAgentReview throws (non-retryable) on malformed output", async () => {
@@ -68,7 +69,9 @@ describe("review activities (runner-injected)", () => {
 			3,
 			() => {},
 		);
-		expect(verdict.real).toBe(false);
+		expect(verdict.verdict.real).toBe(false);
+		// usage summed across the 3 verifier calls (10/20 each)
+		expect(verdict.usage).toEqual({ inputTokens: 30, outputTokens: 60 });
 	});
 
 	it("synthesizeReview assembles a report and counts by dimension", async () => {
@@ -85,5 +88,7 @@ describe("review activities (runner-injected)", () => {
 		expect(report.summary).toBe("1 issue");
 		expect(report.confirmed).toHaveLength(1);
 		expect(report.byDimension.security).toBe(1);
+		// prior usage {5,6} + this synth call {10,20}
+		expect(report.usage).toEqual({ inputTokens: 15, outputTokens: 26 });
 	});
 });

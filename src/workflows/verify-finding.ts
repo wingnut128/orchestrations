@@ -1,6 +1,6 @@
 import { proxyActivities } from "@temporalio/workflow";
 import type * as activities from "../activities/review.ts";
-import type { Finding, Provider, Verdict } from "../contracts/review.ts";
+import type { Finding, Provider, Usage, Verdict } from "../contracts/review.ts";
 
 const { verifyFinding } = proxyActivities<typeof activities>({
 	startToCloseTimeout: "180s",
@@ -17,7 +17,7 @@ export interface VerifyFindingInput {
 
 export async function verifyFindingWorkflow(
 	input: VerifyFindingInput,
-): Promise<Verdict> {
+): Promise<{ verdict: Verdict; usage: Usage }> {
 	return verifyFinding(
 		input.finding,
 		input.workingDir,

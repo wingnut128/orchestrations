@@ -30,9 +30,8 @@ describe("verifyFindingWorkflow", () => {
 			workflowsPath: new URL("./verify-finding.ts", import.meta.url).pathname,
 			activities: {
 				verifyFinding: async () => ({
-					findingId: "f1",
-					real: true,
-					confidence: 0.9,
+					verdict: { findingId: "f1", real: true, confidence: 0.9 },
+					usage: { inputTokens: 30, outputTokens: 60 },
 				}),
 			},
 		});
@@ -45,6 +44,9 @@ describe("verifyFindingWorkflow", () => {
 				taskQueue,
 			}),
 		);
-		expect(result).toEqual({ findingId: "f1", real: true, confidence: 0.9 });
+		expect(result).toEqual({
+			verdict: { findingId: "f1", real: true, confidence: 0.9 },
+			usage: { inputTokens: 30, outputTokens: 60 },
+		});
 	});
 });

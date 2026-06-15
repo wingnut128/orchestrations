@@ -13,6 +13,7 @@ import {
 	reviewPlanJsonSchema,
 	SEVERITY_ORDER,
 	type Severity,
+	type Usage,
 	Verdict,
 	verdictJsonSchema,
 } from "../contracts/review.ts";
@@ -24,6 +25,15 @@ interface PrRef {
 	pr: number;
 	headSha: string;
 	baseSha: string;
+}
+
+const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0 };
+
+function addUsage(a: Usage, b: Usage): Usage {
+	return {
+		inputTokens: a.inputTokens + b.inputTokens,
+		outputTokens: a.outputTokens + b.outputTokens,
+	};
 }
 
 /** Heartbeat helper that tolerates being called outside an activity (tests). */
@@ -40,7 +50,7 @@ function heartbeat(note: string): void {
 export async function planReview(
 	pr: PullRequestContext,
 	providerDefault: Provider,
-): Promise<ReviewPlan> {
+): Promise<{ plan: ReviewPlan; usage: Usage }> {
 	const runner = await getRunner(providerDefault);
 	const filesList = pr.changedFiles
 		.map((f) => `${f.path} (+${f.additions}/-${f.deletions})`)
@@ -57,10 +67,13 @@ export async function planReview(
 	const plan = AgentReviewPlan.parse(out.output);
 	// the lead agent omits provider; assign the request default to each dimension
 	return {
-		dimensions: plan.dimensions.map((d) => ({
-			...d,
-			provider: providerDefault,
-		})),
+		plan: {
+			dimensions: plan.dimensions.map((d) => ({
+				...d,
+				provider: providerDefault,
+			})),
+		},
+		usage: out.usage,
 	};
 }
 
@@ -72,7 +85,7 @@ export async function runAgentReviewWith(
 	workingDir: string,
 	_pr: PrRef,
 	onProgress: (n: string) => void,
-): Promise<DimensionFindings> {
+): Promise<{ findings: DimensionFindings; usage: Usage }> {
 	const out = await runner.run({
 		systemPrompt: `You are a ${dimension.key} reviewer. Investigate the PR using the tools. Report concrete, evidence-backed findings only — no speculation. ${dimension.rationale}`,
 		task: `Review these paths for ${dimension.key} issues: ${dimension.scopePaths.join(", ") || "(whole diff)"}. Use git_diff and read_file to gather evidence.`,
@@ -81,14 +94,14 @@ export async function runAgentReviewWith(
 		workingDir,
 		onProgress,
 	});
-	return DimensionFindings.parse(out.output);
+	return { findings: DimensionFindings.parse(out.output), usage: out.usage };
 }
 
 export async function runAgentReview(
 	dimension: ReviewPlan["dimensions"][number],
 	workingDir: string,
 	pr: PrRef,
-): Promise<DimensionFindings> {
+): Promise<{ findings: DimensionFindings; usage: Usage }> {
 	const runner = await getRunner(dimension.provider);
 	return runAgentReviewWith(runner, dimension, workingDir, pr, heartbeat);
 }
@@ -101,8 +114,9 @@ export async function verifyFindingWith(
 	workingDir: string,
 	verifierCount: number,
 	onProgress: (n: string) => void,
-): Promise<Verdict> {
+): Promise<{ verdict: Verdict; usage: Usage }> {
 	const verdicts: Verdict[] = [];
+	let usage = ZERO_USAGE;
 	for (let i = 0; i < verifierCount; i++) {
 		const out = await runner.run({
 			systemPrompt:
@@ -113,16 +127,20 @@ export async function verifyFindingWith(
 			workingDir,
 			onProgress,
 		});
+		usage = addUsage(usage, out.usage);
 		verdicts.push(Verdict.parse(out.output));
 	}
 	const realVotes = verdicts.filter((v) => v.real).length;
 	const real = realVotes > verifierCount / 2;
 	const avg = verdicts.reduce((s, v) => s + v.confidence, 0) / verdicts.length;
 	return {
-		findingId: finding.id,
-		real,
-		confidence: avg,
-		refutation: real ? undefined : verdicts.find((v) => !v.real)?.refutation,
+		verdict: {
+			findingId: finding.id,
+			real,
+			confidence: avg,
+			refutation: real ? undefined : verdicts.find((v) => !v.real)?.refutation,
+		},
+		usage,
 	};
 }
 
@@ -131,7 +149,7 @@ export async function verifyFinding(
 	workingDir: string,
 	provider: Provider,
 	verifierCount: number,
-): Promise<Verdict> {
+): Promise<{ verdict: Verdict; usage: Usage }> {
 	const runner = await getRunner(provider);
 	return verifyFindingWith(
 		runner,
@@ -148,7 +166,7 @@ export async function completenessCritic(
 	pr: PullRequestContext,
 	covered: string[],
 	provider: Provider,
-): Promise<ReviewPlan> {
+): Promise<{ plan: ReviewPlan; usage: Usage }> {
 	const runner = await getRunner(provider);
 	const out = await runner.run({
 		systemPrompt:
@@ -160,7 +178,10 @@ export async function completenessCritic(
 		onProgress: heartbeat,
 	});
 	const plan = AgentReviewPlan.parse(out.output);
-	return { dimensions: plan.dimensions.map((d) => ({ ...d, provider })) };
+	return {
+		plan: { dimensions: plan.dimensions.map((d) => ({ ...d, provider })) },
+		usage: out.usage,
+	};
 }
 
 // ---- synthesizeReview ----
@@ -174,7 +195,7 @@ export async function synthesizeReviewWith(
 	confirmed: Finding[],
 	dropped: Finding[],
 	dimensionErrors: Record<string, string>,
-	usage: { inputTokens: number; outputTokens: number },
+	priorUsage: Usage,
 	minSeverity: Severity,
 	onProgress: (n: string) => void,
 ): Promise<ReviewReport> {
@@ -204,7 +225,7 @@ export async function synthesizeReviewWith(
 		dropped,
 		byDimension,
 		dimensionErrors,
-		usage,
+		usage: addUsage(priorUsage, out.usage),
 	};
 }
 
@@ -212,7 +233,7 @@ export async function synthesizeReview(
 	confirmed: Finding[],
 	dropped: Finding[],
 	dimensionErrors: Record<string, string>,
-	usage: { inputTokens: number; outputTokens: number },
+	priorUsage: Usage,
 	minSeverity: Severity,
 	provider: Provider,
 ): Promise<ReviewReport> {
@@ -222,7 +243,7 @@ export async function synthesizeReview(
 		confirmed,
 		dropped,
 		dimensionErrors,
-		usage,
+		priorUsage,
 		minSeverity,
 		heartbeat,
 	);

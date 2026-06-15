@@ -3,6 +3,7 @@ import type * as activities from "../activities/review.ts";
 import type {
 	DimensionFindings,
 	ReviewDimension,
+	Usage,
 } from "../contracts/review.ts";
 
 const { runAgentReview } = proxyActivities<typeof activities>({
@@ -25,6 +26,6 @@ export interface ReviewWorkerInput {
 
 export async function reviewWorkerWorkflow(
 	input: ReviewWorkerInput,
-): Promise<DimensionFindings> {
+): Promise<{ findings: DimensionFindings; usage: Usage }> {
 	return runAgentReview(input.dimension, input.workingDir, input.pr);
 }

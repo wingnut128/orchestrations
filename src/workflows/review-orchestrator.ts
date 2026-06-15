@@ -11,10 +11,10 @@ import {
 import type * as ghActivities from "../activities/github.ts";
 import type * as reviewActivities from "../activities/review.ts";
 import type {
-	DimensionFindings,
 	Finding,
 	ReviewReport,
 	ReviewRequest,
+	Usage,
 } from "../contracts/review.ts";
 import type { PullRequestContext } from "../github/types.ts";
 import { reviewWorkerWorkflow } from "./review-worker.ts";
@@ -72,9 +72,20 @@ export async function reviewOrchestratorWorkflow(
 		baseSha: prData.meta.baseSha,
 	};
 
+	// Accumulate token usage across every agent call (lead, workers, verifiers,
+	// critic, synthesizer) so the final report reflects real cost.
+	let totalUsage: Usage = { inputTokens: 0, outputTokens: 0 };
+	const addUsage = (u: Usage) => {
+		totalUsage = {
+			inputTokens: totalUsage.inputTokens + u.inputTokens,
+			outputTokens: totalUsage.outputTokens + u.outputTokens,
+		};
+	};
+
 	// 3. Lead agent plans dimensions
-	const plan = await planReview(pr, req.providerDefault);
-	let dimensions = plan.dimensions;
+	const planResult = await planReview(pr, req.providerDefault);
+	addUsage(planResult.usage);
+	let dimensions = planResult.plan.dimensions;
 
 	const dimensionErrors: Record<string, string> = {};
 	const allFindings: Finding[] = [];
@@ -98,9 +109,10 @@ export async function reviewOrchestratorWorkflow(
 		settled.forEach((r, i) => {
 			const key = dims[i].key;
 			coveredKeys.add(key);
-			if (r.status === "fulfilled")
-				allFindings.push(...(r.value as DimensionFindings).findings);
-			else dimensionErrors[key] = String(r.reason);
+			if (r.status === "fulfilled") {
+				allFindings.push(...r.value.findings.findings);
+				addUsage(r.value.usage);
+			} else dimensionErrors[key] = String(r.reason);
 		});
 	}
 	await runRound(dimensions);
@@ -112,7 +124,8 @@ export async function reviewOrchestratorWorkflow(
 			[...coveredKeys],
 			req.providerDefault,
 		);
-		const fresh = extra.dimensions.filter((d) => !coveredKeys.has(d.key));
+		addUsage(extra.usage);
+		const fresh = extra.plan.dimensions.filter((d) => !coveredKeys.has(d.key));
 		if (fresh.length > 0) {
 			dimensions = fresh;
 			await runRound(fresh);
@@ -139,15 +152,16 @@ export async function reviewOrchestratorWorkflow(
 	const confirmed: Finding[] = [];
 	const dropped: Finding[] = [];
 	allFindings.forEach((f, i) => {
-		(verdicts[i].real ? confirmed : dropped).push(f);
+		addUsage(verdicts[i].usage);
+		(verdicts[i].verdict.real ? confirmed : dropped).push(f);
 	});
 
-	// 7. Synthesize
+	// 7. Synthesize (synthesizeReview adds its own call usage to the running total)
 	const report = await synthesizeReview(
 		confirmed,
 		dropped,
 		dimensionErrors,
-		{ inputTokens: 0, outputTokens: 0 },
+		totalUsage,
 		req.minSeverity,
 		req.providerDefault,
 	);

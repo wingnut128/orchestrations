@@ -22,16 +22,15 @@ describe("reviewWorkerWorkflow", () => {
 	it("returns the dimension findings from the activity", async () => {
 		const { client, nativeConnection } = testEnv;
 		const taskQueue = "test-worker";
-		const findings = {
-			dimension: "security",
-			findings: [],
-			coverageNote: "ok",
+		const activityResult = {
+			findings: { dimension: "security", findings: [], coverageNote: "ok" },
+			usage: { inputTokens: 10, outputTokens: 20 },
 		};
 		const worker = await Worker.create({
 			connection: nativeConnection,
 			taskQueue,
 			workflowsPath: new URL("./review-worker.ts", import.meta.url).pathname,
-			activities: { runAgentReview: async () => findings },
+			activities: { runAgentReview: async () => activityResult },
 		});
 		const result = await worker.runUntil(
 			client.workflow.execute("reviewWorkerWorkflow", {
@@ -46,6 +45,6 @@ describe("reviewWorkerWorkflow", () => {
 				taskQueue,
 			}),
 		);
-		expect(result).toEqual(findings);
+		expect(result).toEqual(activityResult);
 	});
 });
