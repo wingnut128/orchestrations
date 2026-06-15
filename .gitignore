@@ -41,3 +41,6 @@ credentials.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Claude Code local state / agent worktrees
+.claude/
