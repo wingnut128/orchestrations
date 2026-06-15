@@ -390,7 +390,12 @@ import type { ToolContext, ToolSpec } from "./types.ts";
 
 export type { ToolContext, ToolSpec } from "./types.ts";
 
-/** Resolve a user-supplied path and guarantee it stays inside workingDir. */
+/**
+ * Resolve a user-supplied path and guarantee it stays inside workingDir.
+ * Note: symlinks are not resolved — a symlink inside workingDir that points
+ * outside it will not be caught. Acceptable for this reference project (the
+ * threat model is a misconfigured workspace, not an adversarial user).
+ */
 function safeResolve(workingDir: string, p: string): string | null {
 	const abs = isAbsolute(p) ? p : resolve(workingDir, p);
 	const rel = relative(workingDir, abs);
@@ -446,9 +451,13 @@ const grepTool: ToolSpec = {
 			try {
 				if ((await stat(abs)).size > 1_000_000) continue;
 				const text = await readFile(abs, "utf8");
-				text.split("\n").forEach((l, i) => {
-					if (l.includes(pattern)) lines.push(`${rel}:${i + 1}:${l.trim()}`);
-				});
+				const fileLines = text.split("\n");
+				for (let i = 0; i < fileLines.length; i++) {
+					if (fileLines[i].includes(pattern)) {
+						lines.push(`${rel}:${i + 1}:${fileLines[i].trim()}`);
+						if (lines.length >= 200) break;
+					}
+				}
 			} catch {
 				/* skip unreadable/binary files */
 			}
@@ -465,23 +474,31 @@ const listFilesTool: ToolSpec = {
 	handler: async (_input, ctx) => {
 		const acc: string[] = [];
 		await walk(ctx.workingDir, ctx.workingDir, acc);
-		return acc.sort().join("\n");
+		return acc.length ? acc.sort().join("\n") : "No files found.";
 	},
 };
 
 const gitDiffTool: ToolSpec = {
 	name: "git_diff",
-	description: "Show the unified diff of the PR (base..head) for an optional path.",
+	description: "Show the unified diff of the PR (base vs head) for an optional path.",
 	inputSchema: {
 		type: "object",
 		properties: { path: { type: "string", description: "Optional path to limit the diff." } },
 	},
 	handler: async (input, ctx) => {
-		const args = ["-C", ctx.workingDir, "diff", "--no-color", "HEAD~1...HEAD"];
+		if (input.path) {
+			const guarded = safeResolve(ctx.workingDir, String(input.path));
+			if (!guarded) return `Error: path "${input.path}" is outside the working directory.`;
+		}
+		const args = ["-C", ctx.workingDir, "diff", "--no-color", "refs/pr/base", "refs/pr/head"];
 		if (input.path) args.push("--", String(input.path));
 		const proc = Bun.spawn(["git", ...args], { stdout: "pipe", stderr: "pipe" });
-		const out = await new Response(proc.stdout).text();
+		const [out, err] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
 		await proc.exited;
+		if (proc.exitCode !== 0) return `Error running git diff: ${err.trim() || "unknown error"}`;
 		return out || "No diff.";
 	},
 };
@@ -489,7 +506,7 @@ const gitDiffTool: ToolSpec = {
 export const coreTools: ToolSpec[] = [readFileTool, grepTool, listFilesTool, gitDiffTool];
 ```
 
-> Note on `git_diff`: the activity that checks out a PR (Task 6) leaves the PR head as `HEAD` and the base reachable as `HEAD~1` via a squashed base commit, so `HEAD~1...HEAD` yields the PR diff. If checkout strategy changes, update this range.
+> Note on `git_diff`: the checkout activity (Task 6) creates two constant refs — `refs/pr/base` (the PR base SHA) and `refs/pr/head` (the PR head SHA) — so `git diff refs/pr/base refs/pr/head` yields the PR's changes without needing the SHAs threaded into the tool. Two-commit (not three-dot) diff is used so it works with shallow clones (no merge-base needed). stderr is surfaced on non-zero exit so git failures aren't swallowed.
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -687,12 +704,35 @@ Expected: FAIL — `Cannot find module './claude-runner.ts'`.
 - [ ] **Step 4: Implement the runner**
 
 `src/agents/claude-runner.ts`:
+> **Real SDK API (confirmed against `@anthropic-ai/claude-agent-sdk@0.3.177`):** `tool(name, desc, inputSchema, handler)` takes a **Zod raw shape** (`AnyZodRawShape`), NOT a JSON Schema — so convert each ToolSpec's JSON Schema to a Zod raw shape. Tool restriction is done via `options` (verify the exact field — `tools` is the documented restriction lever; `allowedTools` is the auto-approve list). Result message: `{ type: "result", subtype, result: string, usage: { input_tokens, output_tokens } }`.
+
 ```ts
 import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import type { Provider } from "../contracts/review.ts";
 import type { AgentOutcome, AgentRunner, AgentSession } from "./runner.ts";
 
 const MODEL = "claude-sonnet-4-6";
+
+/**
+ * Convert a ToolSpec's JSON Schema into the Zod raw shape the SDK's tool() wants.
+ * Our tools only use object schemas with string properties; required → z.string(),
+ * optional → .optional(), and descriptions carry through. This preserves the
+ * per-tool typed params (path, pattern, …) the model sees — do NOT collapse to a
+ * single opaque `input` field.
+ */
+function toZodShape(inputSchema: Record<string, unknown>): Record<string, z.ZodTypeAny> {
+	const props = (inputSchema.properties ?? {}) as Record<string, { type?: string; description?: string }>;
+	const required = new Set((inputSchema.required as string[] | undefined) ?? []);
+	const shape: Record<string, z.ZodTypeAny> = {};
+	for (const [name, prop] of Object.entries(props)) {
+		let field: z.ZodTypeAny = z.string();
+		if (prop.description) field = field.describe(prop.description);
+		if (!required.has(name)) field = field.optional();
+		shape[name] = field;
+	}
+	return shape;
+}
 
 /** Extract the first JSON object from a possibly fenced/prose-wrapped string. */
 function extractJson(text: string): unknown {
@@ -708,11 +748,11 @@ export class ClaudeAgentRunner implements AgentRunner {
 	readonly provider: Provider = "claude";
 
 	async run<T>(session: AgentSession): Promise<AgentOutcome<T>> {
-		// Wrap our neutral ToolSpecs as an in-process MCP server.
+		// Wrap our neutral ToolSpecs as an in-process MCP server, preserving typed params.
 		const sdkTools = session.tools.map((t) =>
-			tool(t.name, t.description, t.inputSchema, async (input: Record<string, unknown>) => {
+			tool(t.name, t.description, toZodShape(t.inputSchema), async (args: Record<string, unknown>) => {
 				session.onProgress?.(`tool:${t.name}`);
-				const text = await t.handler(input, { workingDir: session.workingDir });
+				const text = await t.handler(args, { workingDir: session.workingDir });
 				return { content: [{ type: "text", text }] };
 			}),
 		);
@@ -724,6 +764,7 @@ export class ClaudeAgentRunner implements AgentRunner {
 		let usage = { inputTokens: 0, outputTokens: 0 };
 		let stopReason: AgentOutcome["stopReason"] = "completed";
 
+		const mcpToolIds = session.tools.map((t) => `mcp__review-tools__${t.name}`);
 		for await (const msg of query({
 			prompt: session.task,
 			options: {
@@ -731,8 +772,9 @@ export class ClaudeAgentRunner implements AgentRunner {
 				systemPrompt: system,
 				maxTurns: session.maxTurns ?? 12,
 				mcpServers: { "review-tools": mcpServer },
-				// Native tools are off unless explicitly opted into.
-				allowedTools: session.nativeTools ? undefined : session.tools.map((t) => `mcp__review-tools__${t.name}`),
+				// Restrict the agent to OUR neutral tools unless nativeTools is opted in.
+				// (Use the SDK's documented tool-restriction option — confirm field name in .d.ts.)
+				...(session.nativeTools ? {} : { tools: mcpToolIds }),
 				cwd: session.workingDir,
 			},
 		})) {
@@ -888,9 +930,13 @@ export async function checkoutPr(owner: string, repo: string, pr: number, headSh
 	await runGit("remote", "add", "origin", cloneUrl);
 	await runGit("fetch", "--depth", "1", "origin", baseSha);
 	await runGit("fetch", "--depth", "1", "origin", headSha);
-	// base as the parent commit so HEAD~1...HEAD == PR diff
-	await runGit("checkout", baseSha);
-	await runGit("checkout", "-b", "__pr_head", headSha);
+	// Constant refs the git_diff tool diffs against (base vs head). The tool
+	// runs `git diff refs/pr/base refs/pr/head`, so no SHAs need threading into
+	// the agent/tool context.
+	await runGit("update-ref", "refs/pr/base", baseSha);
+	await runGit("update-ref", "refs/pr/head", headSha);
+	// Check out the PR head so read_file/grep see the proposed code.
+	await runGit("checkout", headSha);
 	return dir;
 }
 
