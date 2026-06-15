@@ -23,20 +23,46 @@ function extractJson(text: string): unknown {
 	return JSON.parse(candidate.slice(start, end + 1));
 }
 
+/**
+ * Convert a ToolSpec's JSON Schema into the Zod raw shape the SDK's tool() wants.
+ * Our tools only use object schemas with string properties; required → z.string(),
+ * optional → .optional(), and descriptions carry through.
+ */
+function toZodShape(
+	inputSchema: Record<string, unknown>,
+): Record<string, z.ZodTypeAny> {
+	const props = (inputSchema.properties ?? {}) as Record<
+		string,
+		{ type?: string; description?: string }
+	>;
+	const required = new Set(
+		(inputSchema.required as string[] | undefined) ?? [],
+	);
+	const shape: Record<string, z.ZodTypeAny> = {};
+	for (const [name, prop] of Object.entries(props)) {
+		let field: z.ZodTypeAny = z.string();
+		if (prop.description) field = field.describe(prop.description);
+		if (!required.has(name)) field = field.optional();
+		shape[name] = field;
+	}
+	return shape;
+}
+
 export class ClaudeAgentRunner implements AgentRunner {
 	readonly provider: Provider = "claude";
 
 	async run<T>(session: AgentSession): Promise<AgentOutcome<T>> {
 		// Build SDK MCP tools from ToolSpec definitions.
-		// tool() requires a Zod shape; we use a passthrough record and forward to handler.
+		// Each tool's JSON Schema is converted to a proper Zod shape so the model
+		// sees typed parameters (path, pattern, etc.) rather than an opaque input blob.
 		const sdkTools = session.tools.map((t) =>
 			tool(
 				t.name,
 				t.description,
-				{ input: z.record(z.string(), z.unknown()) },
-				async (args: { input: Record<string, unknown> }, _extra: unknown) => {
+				toZodShape(t.inputSchema),
+				async (args: Record<string, unknown>) => {
 					session.onProgress?.(`tool:${t.name}`);
-					const text = await t.handler(args.input, {
+					const text = await t.handler(args, {
 						workingDir: session.workingDir,
 					});
 					return { content: [{ type: "text" as const, text }] };
@@ -48,6 +74,12 @@ export class ClaudeAgentRunner implements AgentRunner {
 			name: "review-tools",
 			tools: sdkTools,
 		});
+
+		// Restrict the available built-in tools when nativeTools is falsy.
+		// options.tools (Options['tools'] in sdk.d.ts) is the restriction lever:
+		// "Specify the base set of available built-in tools. [] disables all built-in tools."
+		// allowedTools only controls auto-approval without prompting — it does NOT restrict.
+		const mcpToolIds = session.tools.map((t) => `mcp__review-tools__${t.name}`);
 
 		const system = `${session.systemPrompt}\n\nRespond with ONLY a JSON object matching this schema:\n${JSON.stringify(session.outputSchema)}`;
 
@@ -62,9 +94,10 @@ export class ClaudeAgentRunner implements AgentRunner {
 				systemPrompt: system,
 				maxTurns: session.maxTurns ?? 12,
 				mcpServers: { "review-tools": mcpServer },
-				allowedTools: session.nativeTools
-					? undefined
-					: session.tools.map((t) => `mcp__review-tools__${t.name}`),
+				// tools restricts the base set; passing our MCP tool IDs disables all
+				// built-ins and exposes only our in-process tools. When nativeTools is
+				// true, omit to use all defaults.
+				...(session.nativeTools ? {} : { tools: mcpToolIds }),
 				cwd: session.workingDir,
 			},
 		})) {
