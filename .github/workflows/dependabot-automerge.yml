@@ -1,0 +1,44 @@
+name: Dependabot auto-merge
+
+# Auto-approves and enables auto-merge for non-major Dependabot updates.
+#
+# Runs as `pull_request_target` so it executes in the base-repo context with
+# Actions secrets and write permissions available (Dependabot `pull_request`
+# runs get a read-only token and no secrets). We never check out the PR head,
+# so untrusted code is not executed.
+#
+# Requires a repo Actions secret `DEPENDABOT_AUTOMERGE_TOKEN`: a PAT belonging
+# to a CODEOWNER (so its review satisfies "Require review from Code Owners").
+# Re-approving on every push also clears the stale-review dismissal that a
+# Dependabot rebase would otherwise trigger. Without the secret the approve
+# step no-ops and auto-merge simply waits for a manual approval.
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Approve as code owner (non-major updates)
+        if: ${{ steps.meta.outputs.update-type != 'version-update:semver-major' }}
+        continue-on-error: true
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.DEPENDABOT_AUTOMERGE_TOKEN }}
+        run: gh pr review --approve "$PR_URL"
+
+      - name: Enable auto-merge (non-major updates)
+        if: ${{ steps.meta.outputs.update-type != 'version-update:semver-major' }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --merge "$PR_URL"
