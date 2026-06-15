@@ -4,7 +4,12 @@ import type { ToolSpec } from "./types.ts";
 
 export type { ToolContext, ToolSpec } from "./types.ts";
 
-/** Resolve a user-supplied path and guarantee it stays inside workingDir. */
+/**
+ * Resolve a user-supplied path and guarantee it stays inside workingDir.
+ * Note: symlinks are not resolved — a symlink inside workingDir that points
+ * outside it will not be caught. Acceptable for this reference project (the
+ * threat model is a misconfigured workspace, not an adversarial user).
+ */
 function safeResolve(workingDir: string, p: string): string | null {
 	const abs = isAbsolute(p) ? p : resolve(workingDir, p);
 	const rel = relative(workingDir, abs);
@@ -77,9 +82,13 @@ const grepTool: ToolSpec = {
 			try {
 				if ((await stat(abs)).size > 1_000_000) continue;
 				const text = await readFile(abs, "utf8");
-				text.split("\n").forEach((l, i) => {
-					if (l.includes(pattern)) lines.push(`${rel}:${i + 1}:${l.trim()}`);
-				});
+				const fileLines = text.split("\n");
+				for (let i = 0; i < fileLines.length; i++) {
+					if (fileLines[i].includes(pattern)) {
+						lines.push(`${rel}:${i + 1}:${fileLines[i].trim()}`);
+						if (lines.length >= 200) break;
+					}
+				}
 			} catch {
 				/* skip unreadable/binary files */
 			}
@@ -97,14 +106,14 @@ const listFilesTool: ToolSpec = {
 	handler: async (_input, ctx) => {
 		const acc: string[] = [];
 		await walk(ctx.workingDir, ctx.workingDir, acc);
-		return acc.sort().join("\n");
+		return acc.length ? acc.sort().join("\n") : "No files found.";
 	},
 };
 
 const gitDiffTool: ToolSpec = {
 	name: "git_diff",
 	description:
-		"Show the unified diff of the PR (base..head) for an optional path.",
+		"Show the unified diff of the PR (base vs head) for an optional path.",
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -112,14 +121,31 @@ const gitDiffTool: ToolSpec = {
 		},
 	},
 	handler: async (input, ctx) => {
-		const args = ["-C", ctx.workingDir, "diff", "--no-color", "HEAD~1...HEAD"];
+		if (input.path) {
+			const guarded = safeResolve(ctx.workingDir, String(input.path));
+			if (!guarded)
+				return `Error: path "${input.path}" is outside the working directory.`;
+		}
+		const args = [
+			"-C",
+			ctx.workingDir,
+			"diff",
+			"--no-color",
+			"refs/pr/base",
+			"refs/pr/head",
+		];
 		if (input.path) args.push("--", String(input.path));
 		const proc = Bun.spawn(["git", ...args], {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const out = await new Response(proc.stdout).text();
+		const [out, err] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
 		await proc.exited;
+		if (proc.exitCode !== 0)
+			return `Error running git diff: ${err.trim() || "unknown error"}`;
 		return out || "No diff.";
 	},
 };
