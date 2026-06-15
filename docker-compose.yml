@@ -1,28 +1,8 @@
 services:
-  # ── Forgejo (local git forge) ────────────────────────────────
-  forgejo:
-    image: codeberg.org/forgejo/forgejo:11
-    ports:
-      - "3000:3000" # Web UI
-      - "2222:22" # SSH
-    environment:
-      - USER_UID=1000
-      - USER_GID=1000
-      # ── App settings ──
-      - FORGEJO__server__ROOT_URL=http://localhost:3000/
-      - FORGEJO__server__SSH_PORT=2222
-      - FORGEJO__server__SSH_LISTEN_PORT=22
-      # ── SQLite (no external DB needed) ──
-      - FORGEJO__database__DB_TYPE=sqlite3
-      # ── Disable features we don't need locally ──
-      - FORGEJO__mailer__ENABLED=false
-      - FORGEJO__service__DISABLE_REGISTRATION=false
-      # ── Webhook: allow localhost targets ──
-      - FORGEJO__webhook__ALLOWED_HOST_LIST=*
-      - FORGEJO__webhook__SKIP_TLS_VERIFY=true
-    volumes:
-      - forgejo-data:/data
-    restart: unless-stopped
+  # ── Forgejo lives outside compose at forgejo.cloudreaper.local:8888 ──
+  # Workers reach it via the x-forgejo YAML anchor below. .local mDNS
+  # doesn't resolve from inside Docker Desktop on macOS, so we pin the
+  # IP via extra_hosts. Update FORGEJO_HOST_IP in .env if the LAN changes.
 
   # ── Temporal persistence (Postgres) ─────────────────────────
   temporal-db:
@@ -114,13 +94,14 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - FORGEJO_URL=http://forgejo:3000
+      - FORGEJO_URL=http://forgejo.cloudreaper.local:8888
       - FORGEJO_TOKEN=${FORGEJO_TOKEN}
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    extra_hosts:
+      - "forgejo.cloudreaper.local:${FORGEJO_HOST_IP:-192.168.1.30}"
     depends_on:
       - temporal
-      - forgejo
       - jaeger
     restart: on-failure
 
@@ -130,16 +111,16 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - SNYK_TOKEN=${SNYK_TOKEN}
-      - FORGEJO_URL=http://forgejo:3000
+      - FORGEJO_URL=http://forgejo.cloudreaper.local:8888
       - FORGEJO_TOKEN=${FORGEJO_TOKEN}
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    extra_hosts:
+      - "forgejo.cloudreaper.local:${FORGEJO_HOST_IP:-192.168.1.30}"
     depends_on:
       - temporal
-      - forgejo
       - jaeger
     restart: on-failure
 
 volumes:
-  forgejo-data:
   temporal-db-data:
