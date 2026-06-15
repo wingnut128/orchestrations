@@ -138,9 +138,9 @@ export async function reviewOrchestratorWorkflow(
 	const verdicts = await Promise.all(verifyHandles.map((h) => h.result()));
 	const confirmed: Finding[] = [];
 	const dropped: Finding[] = [];
-	allFindings.forEach((f, i) =>
-		(verdicts[i].real ? confirmed : dropped).push(f),
-	);
+	allFindings.forEach((f, i) => {
+		(verdicts[i].real ? confirmed : dropped).push(f);
+	});
 
 	// 7. Synthesize
 	const report = await synthesizeReview(
