@@ -67,7 +67,12 @@ services:
       - TEMPORAL_ADDRESS=temporal:7233
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
+      # Point these at Forgejo for isolated local testing:
+      #   GITHUB_API_URL=http://forgejo:3000/api/v1   (API base — Octokit)
+      #   GITHUB_GIT_URL=http://forgejo:3000          (git clone/fetch host)
+      # Defaults keep the worker talking to github.com.
       - GITHUB_API_URL=${GITHUB_API_URL:-https://api.github.com}
+      - GITHUB_GIT_URL=${GITHUB_GIT_URL:-https://github.com}
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
@@ -75,5 +80,37 @@ services:
       - jaeger
     restart: on-failure
 
+  # ── Forgejo (optional) — isolated, GitHub-compatible forge for local review testing ──
+  # OFF by default (guarded by a compose profile). Start it with:
+  #     docker compose --profile forgejo up -d
+  # First run:
+  #   1. open http://localhost:3000 and complete the install wizard (SQLite is fine)
+  #   2. create a user, then an access token (Settings → Applications) with repo scope
+  #   3. push/import a repo to test against
+  #   4. in .env set:
+  #        GITHUB_TOKEN=<that-forgejo-token>
+  #        GITHUB_API_URL=http://forgejo:3000/api/v1   # http://localhost:3000/api/v1 from host
+  #        GITHUB_GIT_URL=http://forgejo:3000          # http://localhost:3000 from host
+  # NOTE: Forgejo speaks a Gitea-flavored subset of the GitHub API. See the
+  # "GitHub-compat caveats" comment in src/github/pr.ts / post-review.ts —
+  # the diff media type, pulls/{n}/files, and review event names / line comments
+  # are the likely spots that need adjustment before an end-to-end run works.
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:latest # pin to a current major before relying on this
+    profiles: ["forgejo"]
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - FORGEJO__database__DB_TYPE=sqlite3
+      - FORGEJO__server__ROOT_URL=http://localhost:3000/
+      - FORGEJO__server__SSH_PORT=222
+    ports:
+      - "3000:3000" # web UI + REST API
+      - "222:22" # git over SSH (optional)
+    volumes:
+      - forgejo-data:/data
+    restart: unless-stopped
+
 volumes:
   temporal-db-data:
+  forgejo-data:

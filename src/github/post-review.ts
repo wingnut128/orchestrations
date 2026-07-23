@@ -32,6 +32,14 @@ export function buildReviewPayload(report: ReviewReport): ReviewPayload {
 	return { event, body, comments };
 }
 
+// Forgejo/Gitea caveats [UNVERIFIED — verify against your Forgejo version;
+// see src/github/pr.ts for the full list]:
+//   • event names: GitHub takes APPROVE / REQUEST_CHANGES / COMMENT; Gitea's
+//     review API is believed to expect APPROVED / REQUEST_CHANGES / COMMENT /
+//     PENDING — if so, the APPROVE → APPROVED mismatch needs mapping here.
+//   • inline comments: GitHub keys off the file `line`; Gitea is believed to
+//     key off the diff position (old_position/new_position). buildReviewPayload
+//     emits file lines, so comment placement may be wrong until translated.
 export async function postReview(
 	octokit: Octokit,
 	owner: string,

@@ -5,6 +5,9 @@
  *   TEMPORAL_ADDRESS  — Temporal server (default: localhost:7233)
  *   GITHUB_TOKEN      — GitHub personal access token or app token
  *   GITHUB_API_URL    — GitHub API base URL (default: https://api.github.com)
+ *   GITHUB_GIT_URL    — Git clone/fetch host (default: https://github.com).
+ *                       Point at a self-hosted forge (Forgejo/Gitea), e.g.
+ *                       http://forgejo:3000, to keep review runs off github.com.
  *
  * OpenTelemetry (optional):
  *   OTEL_ENABLED                    — Set to "true" to enable tracing
@@ -50,6 +53,10 @@ export const config = {
 	github: {
 		token: process.env.GITHUB_TOKEN ?? "",
 		apiUrl: process.env.GITHUB_API_URL ?? "https://api.github.com",
+		// Repo host for git clone/fetch — deliberately separate from apiUrl,
+		// since GitHub's API host (api.github.com) differs from its git host
+		// (github.com). For Forgejo/Gitea both usually share one origin.
+		gitUrl: process.env.GITHUB_GIT_URL ?? "https://github.com",
 	},
 	otel: {
 		enabled: process.env.OTEL_ENABLED === "true",
