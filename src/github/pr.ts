@@ -5,6 +5,23 @@ import { Octokit } from "@octokit/rest";
 import { config } from "../config.ts";
 import type { PullRequestContext } from "./types.ts";
 
+// ── GitHub-compat caveats (for pointing this at Forgejo/Gitea) ───────────────
+// Octokit talks to config.github.apiUrl, so a Gitea-flavored API host mostly
+// "just works" — but a few calls below rely on GitHub-specific behavior that
+// Forgejo implements differently. Verify these against your Forgejo version:
+//   • fetchPrDiff() [CONFIRMED]: Forgejo does NOT honor the
+//     `application/vnd.github.v3.diff` Accept header on pulls.get. Fetch the
+//     diff from its dedicated route instead:
+//     GET /repos/{owner}/{repo}/pulls/{index}.diff  (or .patch).
+//   • buildPrContext() [CONFIRMED OK]: pulls.listFiles →
+//     GET /repos/{owner}/{repo}/pulls/{index}/files works — added in Gitea
+//     1.18 and present in every Forgejo release, so no version concern.
+//   • checkoutPr() [UNVERIFIED — verify against your Forgejo version]: the
+//     clone URL below uses GitHub's magic "x-access-token" username; Forgejo
+//     likely wants "<token>@host" or "<user>:<token>@host" instead.
+//   • post-review.ts postReview() [UNVERIFIED — verify against your Forgejo
+//     version]: review `event` names and inline-comment line semantics are
+//     believed to differ (Gitea-style APPROVED + diff positions). See note there.
 export function makeOctokit(): Octokit {
 	return new Octokit({
 		auth: config.github.token,
@@ -63,7 +80,14 @@ export async function checkoutPr(
 	baseSha: string,
 ): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), `pr-${owner}-${repo}-${pr}-`));
-	const cloneUrl = `https://x-access-token:${config.github.token}@github.com/${owner}/${repo}.git`;
+	// Inject the token into the configured git host (github.com by default).
+	// Keeps GitHub's "x-access-token" scheme; for Forgejo/Gitea you'll likely
+	// need "<token>@host" or "<user>:<token>@host" instead (see caveats above).
+	const scheme = config.github.gitUrl.startsWith("http://") ? "http" : "https";
+	const gitHost = config.github.gitUrl
+		.replace(/^https?:\/\//, "")
+		.replace(/\/+$/, "");
+	const cloneUrl = `${scheme}://x-access-token:${config.github.token}@${gitHost}/${owner}/${repo}.git`;
 	const runGit = async (...args: string[]) => {
 		const proc = Bun.spawn(["git", "-C", dir, ...args], {
 			stdout: "pipe",
